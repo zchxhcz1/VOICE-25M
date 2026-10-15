@@ -1,0 +1,375 @@
+{
+  "gate_sha256": "19e3ef06614799508431e98f73d6f7e812b0d589455b4dc8409e11ecab5f4f38",
+  "checkpoint_sha256": "5d00bb93a1b34c5028e6e42711d75965aeaf8cf5a34cdd710e4a8e748643c48f",
+  "stage2_checkpoint_sha256": "ee981add0036126728e78619d4718c426e8d3f2e65aae95eb4ecaac56f76a0fc",
+  "gene_space_sha256": "87ac6eb3e95da658e2993ea54b8043f4bb60604fa48100aeea8697c4b84bd938",
+  "cache_fingerprint": "a4cde9b15cd5c8163795040936d3ea8bd8ad9b11ca6c19afb2f776147038da0c",
+  "retrieval_method": "comm100_K50",
+  "K": 50,
+  "tau": 0.03,
+  "target_size": 100,
+  "calibrated_for_comm100": true,
+  "reference_protocol_hash": "1bd2ce30c420cfa0f4f2d9a7fb34af885083afa5825c3a45a0ba12a0ec52e116",
+  "reference_objects": [
+    "110",
+    "120",
+    "221",
+    "222",
+    "231",
+    "232",
+    "242",
+    "COAD",
+    "HCC",
+    "OV",
+    "TID1_scene2",
+    "TID1_scene3",
+    "TID1_scene4",
+    "benchmark_ovary_io_Xenium_V1_Human_Ovarian_Cancer_Addon_FFPE",
+    "bone_bone_marrow_bone_bone_marrow_xenium_Xenium_V1_hBoneMarrow_acute_lymphoid_leukemia_section",
+    "bone_bone_marrow_bone_bone_marrow_xenium_Xenium_V1_hBoneMarrow_nondiseased_section",
+    "bone_bone_marrow_bone_bone_marrow_xenium_Xenium_V1_hBone_nondiseased_section",
+    "breast_cancer_sample3_xenium_Xenium_V1_FFPE_Human_Breast_IDC_With_Addon",
+    "breast_cancer_sample4_xenium_Xenium_V1_FFPE_Human_Breast_IDC_With_Addon",
+    "breast_cancer_sample5_xenium_Xenium_V1_FFPE_Human_Breast_ILC_With_Addon",
+    "breast_cancer_sample6_xenium_Xenium_V1_FFPE_Human_Breast_IDC",
+    "breast_cancer_sample7_xenium_Xenium_V1_FFPE_Human_Breast_ILC",
+    "breast_cancer_sample8_xenium_replicate1_Xenium_V1_FFPE_Human_Breast_IDC_Big_1",
+    "breast_cancer_sample8_xenium_replicate2_Xenium_V1_FFPE_Human_Breast_IDC_Big_2",
+    "cervilla_Breast",
+    "colon_cancer_addon",
+    "colon_colon_preview_xenium_Xenium_V1_hColon_Non_diseased_Base_FFPE",
+    "colorectal_cancer_colorectal_cancer_xenium_Xenium_V1_Human_Colorectal_Cancer_Addon_FFPE",
+    "heart_heart_sample1_xenium_Xenium_V1_hHeart_nondiseased_section_FFPE",
+    "hest_NCBI856",
+    "hest_NCBI857",
+    "hest_NCBI860",
+    "hest_NCBI861",
+    "hest_NCBI864",
+    "hest_NCBI865",
+    "hest_NCBI867",
+    "hest_NCBI870",
+    "hest_NCBI881",
+    "hest_NCBI882",
+    "hest_NCBI885",
+    "hest_NCBI886",
+    "hest_NCBI887",
+    "hest_NCBI888",
+    "hest_TENX115",
+    "hest_TENX138",
+    "hest_TENX141",
+    "hest_TENX147",
+    "hest_TENX148",
+    "hest_TENX149",
+    "hest_TENX158",
+    "hest_TENX188",
+    "hest_TENX191",
+    "hest_TENX192",
+    "hest_TENX193",
+    "hest_TENX194",
+    "hest_TENX195",
+    "hest_TENX196",
+    "hest_TENX197",
+    "hest_TENX198",
+    "hest_TENX199",
+    "hest_TENX200",
+    "hest_TENX201",
+    "hest_TENX202",
+    "kidney_kidney_preview_xenium_Xenium_V1_hKidney_nondiseased_section",
+    "kidney_protein",
+    "liver_liver_xenium_Xenium_V1_hLiver_cancer_section_FFPE",
+    "liver_liver_xenium_Xenium_V1_hLiver_nondiseased_section_FFPE",
+    "lung_cancer_lung_cancer_post_xenium_technote_Xenium_V1_Human_Lung_Cancer_FFPE",
+    "lung_prime",
+    "lymph_node_prime",
+    "ovary_ovary_cross_platform_fresh_frozen_xenium_Xenium_V1_Human_Ovary_Cancer_FF",
+    "ovary_prime_cancer_ff",
+    "pancreas_pancreas_multimodal_xenium_Xenium_V1_human_Pancreas_FFPE",
+    "pancreas_pancreatic_cancer_xenium_Xenium_V1_hPancreas_Cancer_Add_on_FFPE",
+    "prostate_prostate_prime_ffpe_xenium_Xenium_Prime_Human_Prostate_FFPE",
+    "skin_skin_normal_xenium_Xenium_V1_hSkin_nondiseased_section_1_FFPE",
+    "skin_skin_normal_xenium_Xenium_V1_hSkin_nondiseased_section_2_FFPE",
+    "tonsil_follicular",
+    "tonsil_reactive"
+  ],
+  "reference_exclusions": {
+    "110": [
+      "110"
+    ],
+    "120": [
+      "120"
+    ],
+    "221": [
+      "221"
+    ],
+    "222": [
+      "222"
+    ],
+    "231": [
+      "231"
+    ],
+    "232": [
+      "232"
+    ],
+    "242": [
+      "242"
+    ],
+    "COAD": [
+      "COAD"
+    ],
+    "HCC": [
+      "HCC"
+    ],
+    "OV": [
+      "OV"
+    ],
+    "TID1_scene2": [
+      "TID1_scene2"
+    ],
+    "TID1_scene3": [
+      "TID1_scene3"
+    ],
+    "TID1_scene4": [
+      "TID1_scene4"
+    ],
+    "benchmark_ovary_io_Xenium_V1_Human_Ovarian_Cancer_Addon_FFPE": [
+      "benchmark_ovary_io_Xenium_V1_Human_Ovarian_Cancer_Addon_FFPE"
+    ],
+    "bone_bone_marrow_bone_bone_marrow_xenium_Xenium_V1_hBoneMarrow_acute_lymphoid_leukemia_section": [
+      "bone_bone_marrow_bone_bone_marrow_xenium_Xenium_V1_hBoneMarrow_acute_lymphoid_leukemia_section"
+    ],
+    "bone_bone_marrow_bone_bone_marrow_xenium_Xenium_V1_hBoneMarrow_nondiseased_section": [
+      "bone_bone_marrow_bone_bone_marrow_xenium_Xenium_V1_hBoneMarrow_nondiseased_section"
+    ],
+    "bone_bone_marrow_bone_bone_marrow_xenium_Xenium_V1_hBone_nondiseased_section": [
+      "bone_bone_marrow_bone_bone_marrow_xenium_Xenium_V1_hBone_nondiseased_section"
+    ],
+    "breast_cancer_sample3_xenium_Xenium_V1_FFPE_Human_Breast_IDC_With_Addon": [
+      "breast_cancer_sample3_xenium_Xenium_V1_FFPE_Human_Breast_IDC_With_Addon"
+    ],
+    "breast_cancer_sample4_xenium_Xenium_V1_FFPE_Human_Breast_IDC_With_Addon": [
+      "breast_cancer_sample4_xenium_Xenium_V1_FFPE_Human_Breast_IDC_With_Addon"
+    ],
+    "breast_cancer_sample5_xenium_Xenium_V1_FFPE_Human_Breast_ILC_With_Addon": [
+      "breast_cancer_sample5_xenium_Xenium_V1_FFPE_Human_Breast_ILC_With_Addon"
+    ],
+    "breast_cancer_sample6_xenium_Xenium_V1_FFPE_Human_Breast_IDC": [
+      "breast_cancer_sample6_xenium_Xenium_V1_FFPE_Human_Breast_IDC"
+    ],
+    "breast_cancer_sample7_xenium_Xenium_V1_FFPE_Human_Breast_ILC": [
+      "breast_cancer_sample7_xenium_Xenium_V1_FFPE_Human_Breast_ILC"
+    ],
+    "breast_cancer_sample8_xenium_replicate1_Xenium_V1_FFPE_Human_Breast_IDC_Big_1": [
+      "breast_cancer_sample8_xenium_replicate1_Xenium_V1_FFPE_Human_Breast_IDC_Big_1",
+      "breast_cancer_sample8_xenium_replicate2_Xenium_V1_FFPE_Human_Breast_IDC_Big_2"
+    ],
+    "breast_cancer_sample8_xenium_replicate2_Xenium_V1_FFPE_Human_Breast_IDC_Big_2": [
+      "breast_cancer_sample8_xenium_replicate1_Xenium_V1_FFPE_Human_Breast_IDC_Big_1",
+      "breast_cancer_sample8_xenium_replicate2_Xenium_V1_FFPE_Human_Breast_IDC_Big_2"
+    ],
+    "cervilla_Breast": [
+      "cervilla_Breast"
+    ],
+    "colon_cancer_addon": [
+      "colon_cancer_addon"
+    ],
+    "colon_colon_preview_xenium_Xenium_V1_hColon_Non_diseased_Base_FFPE": [
+      "colon_colon_preview_xenium_Xenium_V1_hColon_Non_diseased_Base_FFPE"
+    ],
+    "colorectal_cancer_colorectal_cancer_xenium_Xenium_V1_Human_Colorectal_Cancer_Addon_FFPE": [
+      "colorectal_cancer_colorectal_cancer_xenium_Xenium_V1_Human_Colorectal_Cancer_Addon_FFPE"
+    ],
+    "heart_heart_sample1_xenium_Xenium_V1_hHeart_nondiseased_section_FFPE": [
+      "heart_heart_sample1_xenium_Xenium_V1_hHeart_nondiseased_section_FFPE"
+    ],
+    "hest_NCBI856": [
+      "hest_NCBI856",
+      "hest_NCBI857"
+    ],
+    "hest_NCBI857": [
+      "hest_NCBI856",
+      "hest_NCBI857"
+    ],
+    "hest_NCBI860": [
+      "hest_NCBI860",
+      "hest_NCBI861"
+    ],
+    "hest_NCBI861": [
+      "hest_NCBI860",
+      "hest_NCBI861"
+    ],
+    "hest_NCBI864": [
+      "hest_NCBI864"
+    ],
+    "hest_NCBI865": [
+      "hest_NCBI865"
+    ],
+    "hest_NCBI867": [
+      "hest_NCBI867"
+    ],
+    "hest_NCBI870": [
+      "hest_NCBI870"
+    ],
+    "hest_NCBI881": [
+      "hest_NCBI881",
+      "hest_NCBI882"
+    ],
+    "hest_NCBI882": [
+      "hest_NCBI881",
+      "hest_NCBI882"
+    ],
+    "hest_NCBI885": [
+      "hest_NCBI885"
+    ],
+    "hest_NCBI886": [
+      "hest_NCBI886",
+      "hest_NCBI887"
+    ],
+    "hest_NCBI887": [
+      "hest_NCBI886",
+      "hest_NCBI887"
+    ],
+    "hest_NCBI888": [
+      "hest_NCBI888"
+    ],
+    "hest_TENX115": [
+      "hest_TENX115"
+    ],
+    "hest_TENX138": [
+      "hest_TENX138"
+    ],
+    "hest_TENX141": [
+      "hest_TENX141"
+    ],
+    "hest_TENX147": [
+      "hest_TENX147"
+    ],
+    "hest_TENX148": [
+      "hest_TENX148"
+    ],
+    "hest_TENX149": [
+      "hest_TENX149"
+    ],
+    "hest_TENX158": [
+      "hest_TENX158"
+    ],
+    "hest_TENX188": [
+      "hest_TENX188"
+    ],
+    "hest_TENX191": [
+      "hest_TENX191",
+      "hest_TENX192",
+      "hest_TENX193"
+    ],
+    "hest_TENX192": [
+      "hest_TENX191",
+      "hest_TENX192",
+      "hest_TENX193"
+    ],
+    "hest_TENX193": [
+      "hest_TENX191",
+      "hest_TENX192",
+      "hest_TENX193"
+    ],
+    "hest_TENX194": [
+      "hest_TENX194",
+      "hest_TENX195",
+      "hest_TENX196"
+    ],
+    "hest_TENX195": [
+      "hest_TENX194",
+      "hest_TENX195",
+      "hest_TENX196"
+    ],
+    "hest_TENX196": [
+      "hest_TENX194",
+      "hest_TENX195",
+      "hest_TENX196"
+    ],
+    "hest_TENX197": [
+      "hest_TENX197",
+      "hest_TENX198",
+      "hest_TENX199"
+    ],
+    "hest_TENX198": [
+      "hest_TENX197",
+      "hest_TENX198",
+      "hest_TENX199"
+    ],
+    "hest_TENX199": [
+      "hest_TENX197",
+      "hest_TENX198",
+      "hest_TENX199"
+    ],
+    "hest_TENX200": [
+      "hest_TENX200",
+      "hest_TENX201",
+      "hest_TENX202"
+    ],
+    "hest_TENX201": [
+      "hest_TENX200",
+      "hest_TENX201",
+      "hest_TENX202"
+    ],
+    "hest_TENX202": [
+      "hest_TENX200",
+      "hest_TENX201",
+      "hest_TENX202"
+    ],
+    "kidney_kidney_preview_xenium_Xenium_V1_hKidney_nondiseased_section": [
+      "kidney_kidney_preview_xenium_Xenium_V1_hKidney_nondiseased_section"
+    ],
+    "kidney_protein": [
+      "kidney_protein"
+    ],
+    "liver_liver_xenium_Xenium_V1_hLiver_cancer_section_FFPE": [
+      "liver_liver_xenium_Xenium_V1_hLiver_cancer_section_FFPE"
+    ],
+    "liver_liver_xenium_Xenium_V1_hLiver_nondiseased_section_FFPE": [
+      "liver_liver_xenium_Xenium_V1_hLiver_nondiseased_section_FFPE"
+    ],
+    "lung_cancer_lung_cancer_post_xenium_technote_Xenium_V1_Human_Lung_Cancer_FFPE": [
+      "lung_cancer_lung_cancer_post_xenium_technote_Xenium_V1_Human_Lung_Cancer_FFPE"
+    ],
+    "lung_prime": [
+      "lung_prime"
+    ],
+    "lymph_node_prime": [
+      "lymph_node_prime"
+    ],
+    "ovary_ovary_cross_platform_fresh_frozen_xenium_Xenium_V1_Human_Ovary_Cancer_FF": [
+      "ovary_ovary_cross_platform_fresh_frozen_xenium_Xenium_V1_Human_Ovary_Cancer_FF",
+      "ovary_prime_cancer_ff"
+    ],
+    "ovary_prime_cancer_ff": [
+      "ovary_ovary_cross_platform_fresh_frozen_xenium_Xenium_V1_Human_Ovary_Cancer_FF",
+      "ovary_prime_cancer_ff"
+    ],
+    "pancreas_pancreas_multimodal_xenium_Xenium_V1_human_Pancreas_FFPE": [
+      "pancreas_pancreas_multimodal_xenium_Xenium_V1_human_Pancreas_FFPE"
+    ],
+    "pancreas_pancreatic_cancer_xenium_Xenium_V1_hPancreas_Cancer_Add_on_FFPE": [
+      "pancreas_pancreatic_cancer_xenium_Xenium_V1_hPancreas_Cancer_Add_on_FFPE"
+    ],
+    "prostate_prostate_prime_ffpe_xenium_Xenium_Prime_Human_Prostate_FFPE": [
+      "prostate_prostate_prime_ffpe_xenium_Xenium_Prime_Human_Prostate_FFPE"
+    ],
+    "skin_skin_normal_xenium_Xenium_V1_hSkin_nondiseased_section_1_FFPE": [
+      "skin_skin_normal_xenium_Xenium_V1_hSkin_nondiseased_section_1_FFPE"
+    ],
+    "skin_skin_normal_xenium_Xenium_V1_hSkin_nondiseased_section_2_FFPE": [
+      "skin_skin_normal_xenium_Xenium_V1_hSkin_nondiseased_section_2_FFPE"
+    ],
+    "tonsil_follicular": [
+      "tonsil_follicular"
+    ],
+    "tonsil_reactive": [
+      "tonsil_reactive"
+    ]
+  },
+  "R_dtype": "float32",
+  "rule": "v3",
+  "tissue_casefold": true,
+  "min_refs": 2,
+  "panel_cut": 1000,
+  "original_gate_sha256": "1d5f10255d605bfc9467edd5b34f9725eaf4b4961c32f08ad08eb940ee040240"
+}

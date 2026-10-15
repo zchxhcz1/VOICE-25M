@@ -1,0 +1,10 @@
+{
+  "schema": "voice25m-release-v1",
+  "uni2h": "uni2h",
+  "stage1": "stage1.pt",
+  "stage2": "stage2.pt",
+  "gene_space": "gene_space.npz",
+  "xenium_genes": "xenium_genes.tsv",
+  "bank": "bank",
+  "gate": "gate_v3.json"
+}

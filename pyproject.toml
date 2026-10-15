@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voice-he-st-pred"
+version = "0.2.0"
+description = "VOICE-25M: H&E to single-cell expression with comm100/K50 retrieval and V3 fusion"
+requires-python = ">=3.10"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["voice*", "predict*", "train*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+"voice.scgpt_backend" = ["LICENSE", "NOTICE.md"]
