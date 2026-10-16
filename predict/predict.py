@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Single command: H&E -> automatic segmentation -> A + comm100/K50 R -> V3 fusion."""
+"""Predict single-cell expression from H&E with automatic segmentation and reference retrieval."""
 from pathlib import Path
 import argparse
 import json
@@ -18,7 +18,7 @@ def parser():
     p.add_argument('--mpp', type=float, help='Microns per source pixel; required if absent from slide metadata')
     p.add_argument('--release', required=True, help='Portable model directory containing release.json')
     p.add_argument('--out', required=True, help='Output .h5ad; matrices are streamed to disk')
-    p.add_argument('--tissue', default='', help='V3 tissue key; omitted/unknown uses global beta')
+    p.add_argument('--tissue', default='', help='Tissue key for fusion weights; omitted or unknown uses global weights')
     p.add_argument('--genes', default='all', help='all, xenium, or a text file of gene symbols (one per line)')
     p.add_argument('--direct-only', action='store_true', help='Run A without bank or gate')
     p.add_argument('--device', default='cuda')
@@ -83,7 +83,7 @@ def main(argv=None):
     from predict.tiling import tiles_for
     from voice.gate import apply_gate
     from voice.gate_rules import select_gate, validate_gate_genes
-    from voice.retrieval import CommunityR100
+    from voice.retrieval import ReferenceBank
     src = open_slide(a.image, a.cells, a.prepared, a.mpp)
     if not len(src):
         raise ValueError('No cells in input')
@@ -168,7 +168,7 @@ def main(argv=None):
         if not a.direct_only:
             target_id = a.sample_id or Path(a.prepared or a.image).stem
             excluded = set(a.exclude) | {target_id}
-            bank = CommunityR100(release.paths['bank'],device=a.device,exclude=excluded)
+            bank = ReferenceBank(release.paths['bank'],device=a.device,exclude=excluded)
             bank.configure(panel)
             R = matrix(h['layers'],'R',(n,g))
             covered = bank.covered
@@ -177,7 +177,7 @@ def main(argv=None):
                 retrieved,_ = bank.retrieve(H1[start:end],50)
                 fused,beta = apply_gate(A[start:end],retrieved,panel,beta_map)
                 R[start:end] = retrieved; X[start:end] = fused
-                print(f'[R+V3] {end:,}/{n:,} cells',flush=True)
+                print(f'[retrieval + fusion] {end:,}/{n:,} cells',flush=True)
             info.update({'K':50,'tau':0.03,'cluster_target_size':100,
                          'bank_fingerprint':bank.model['cache_fingerprint'],
                          'excluded_objects':sorted(excluded & set(bank.model['objects']))})

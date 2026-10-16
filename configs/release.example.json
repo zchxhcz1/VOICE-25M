@@ -6,5 +6,5 @@
   "gene_space": "gene_space.npz",
   "xenium_genes": "xenium_genes.tsv",
   "bank": "bank",
-  "gate": "gate_v3.json"
+  "gate": "beta.json"
 }

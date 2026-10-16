@@ -1,23 +1,4 @@
-"""scGPT (whole-human) cell embeddings for every object of the corpus -- the Stage-1 target for
-`clip_muon_ab.py --target scgpt` (docs/scgpt_variant.md).
-
-Uses scGPT's own code, vendored unmodified in third_party/scgpt (v0.2.4), exactly as
-`scgpt.tasks.cell_emb.get_batch_cell_embeddings` does it:
-  * genes outside scGPT's vocabulary are dropped; each cell's tokens are its non-zero genes, `<cls>` prepended with
-    value pad_value (-2);
-  * `DataCollator(do_binning=True, max_length=1200, sampling=True, keep_first_n_tokens=1)`: per-cell binning of raw
-    counts into 51 bins, random subsampling to 1,200 tokens for cells with more non-zero genes (CosMx);
-  * fp16 autocast, the `<cls>` position of `TransformerModel._encode`, L2-normalised.
-Cells are batched by length (the official loader is sequential); each cell is still encoded on its own, so this
-changes speed, not values, apart from the binning tie-break / subsampling RNG, seeded per object with crc32(name) so reruns are bit-identical. The model is
-built as in `embed_data` with use_fast_transformer=False (no flash-attn), Wqkv -> in_proj as scgpt.utils does.
-
-Output: $VOICE_SCGPT_EMB/<obj>.npy, [n_expression_rows, 512] float16, ROW-ALIGNED with expression.npz (the
-scf_cellemb.npy convention). Cells with no in-vocabulary non-zero gene get a zero row; clip_muon_ab drops those.
-Per-object stats go to <obj>.json. Resumable: finished objects are skipped.
-
-    python scgpt_cellemb.py [--only a,b] [--shard k --nshard n]
-"""
+"""Prepare row-aligned scGPT cell embeddings from measured expression."""
 from __future__ import annotations
 import os, sys, json, time, glob, types, zlib, logging, argparse
 from contextlib import nullcontext

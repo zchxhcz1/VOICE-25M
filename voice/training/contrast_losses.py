@@ -1,7 +1,7 @@
 """Contrastive training losses."""
 import math
 import torch, torch.nn as nn, torch.nn.functional as F
-import clip_lora as C
+import contrastive as C
 
 
 class ContrastLoss(nn.Module):

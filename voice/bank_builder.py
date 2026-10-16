@@ -1,4 +1,4 @@
-"""Full-cell, per-object PCA64 / 10-step exact k-means / comm100 builder."""
+"""Construct a reference bank by clustering cell features within each reference slide."""
 from pathlib import Path
 import argparse
 import gc
@@ -123,7 +123,7 @@ def build(args):
         stats = []
         for si, obj in enumerate(objects):
             started = time.perf_counter()
-            path = root / 'summaries' / f'object_{si:02d}_comm100'
+            path = root / 'summaries' / f'object_{si:02d}'
             if (path / 'complete.json').exists():
                 stats.append(validate_completed(path, cache_fingerprint, obj['object']))
                 print('reuse completed', obj['object'], flush=True)

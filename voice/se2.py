@@ -1,28 +1,4 @@
-"""SMELT-style prelude-recur-coda looping for VOICE's SE(2) transformer.
-
-VOICE's SE2Transformer is a ModuleList of n_layers=4 SE2Layers over a set of spatially co-located cells:
-
-    Z = gaussian(pairwise distances)         # [N, N, d_pair]  edge state
-    for layer in self.layers:
-        feat, Z = layer(feat, Z)             # BOTH node and edge state are refined
-
-That is a message-passing iteration over a (node, edge) state, which is a better fit for weight-tied looping
-than a plain token stack -- looping re-applies the same refinement operator, exactly what the state form
-suggests. SE(2) invariance is unaffected: it comes from Z depending only on |pos_i - pos_j|, and every loop
-pass reads the same distances.
-
-SE2Layer has THREE residual updates, not two:
-
-    Z    = Z    + pair_mlp(...)
-    feat = feat + out_proj(attn_out)
-    feat = feat + ffn(norm2(feat))
-
-SMELT scales the residual update of every sublayer inside the looped span by 1/r, because weight-tied passes
-produce correlated updates that otherwise inflate the state by roughly r. All three are scaled here; missing
-the Z one would let the edge state grow unchecked while the node state stayed calibrated.
-
-Nothing in voice/ is edited: LoopedSE2Layer subclasses SE2Layer and only overrides forward.
-"""
+"""Spatial attention based on pairwise cell distances."""
 from __future__ import annotations
 import math
 import torch, torch.nn as nn
@@ -50,12 +26,7 @@ class LoopedSE2Layer(SE2Layer):
 
 
 class LoopedSE2Transformer(nn.Module):
-    """n_layers is the PARAMETER budget in SE2Layers; `span` is the looped fraction; effective depth is
-    n_layers + (span_layers) * (r - 1).
-
-    span=0 or r=1 reproduces VOICE's SE2Transformer exactly (asserted in the self-test below), so the
-    baseline arm is not a re-implementation with different numerics.
-    """
+    """Spatial transformer with optional shared-weight attention layers."""
 
     def __init__(self, d_model=256, d_pair=64, n_heads=8, n_layers=4, span=0.0, r=1,
                  n_gaussians=128, max_dist=137.0):

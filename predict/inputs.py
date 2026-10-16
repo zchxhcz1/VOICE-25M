@@ -1,36 +1,4 @@
-"""(Vendored from spatial_fm/predict/inputs.py, VOICE-23M; the crop/mask contract is identical for VOICE-25M.
-Only `PreparedSlide.expression` was rewritten to return global gene ids of the 18,580-gene space.)
-
-Where the model's input crops come from. Two sources, one interface.
-
-VOICE needs three things per cell: a crop centred on it, a mask saying which pixels of that crop are the cell,
-and the cell's slide coordinates. Those can be produced two ways, and downstream code should not care which:
-
-**A whole-slide image plus segmentations** (`WSISlide`). Crops are cut from the image on the fly. This is the
-path for a slide you just scanned: run `predict/segment.py`, then predict. The crop side is derived from your
-resolution so the field of view matches training.
-
-**An already-prepared slide** (`PreparedSlide`). Crops were written to disk ahead of time, one PNG per cell,
-alongside the polygons in crop-local coordinates. This is the layout the training and benchmark corpora use:
-
-    <slide>/
-        patch_cell_boundaries.npz    expr_rows, indptr, vertex_x_patch, vertex_y_patch, x_pixel, y_pixel,
-                                     output_size, crop_px
-        manifest.csv.gz              expr_row -> patch_path
-        patches/                     the crops
-        expression.npz, genes.tsv    optional; only needed to SCORE a prediction
-
-Prepared slides need no resolution argument: the crop was already cut at the right physical size, and the
-polygon coordinates are already in the crop's frame. That makes this path exactly reproducible -- the same
-bytes go into the encoder every time -- which is why the benchmark uses it.
-
-Both classes expose the same three methods, so `predict/predict.py` and `benchmark/` treat them identically:
-
-    len(src)                 number of cells
-    src.pos                  [N,2] float32, (y, x) in slide pixels
-    src.ids                  [N] str
-    src.batch(idx)           (uint8 [n,3,224,224], float32 [n,16,16]) for the cells at `idx`
-"""
+"""Read cell crops and boundaries from a slide image or a prepared slide directory."""
 from __future__ import annotations
 import os
 import numpy as np

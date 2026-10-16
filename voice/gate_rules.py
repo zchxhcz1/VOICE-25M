@@ -1,4 +1,4 @@
-"""Shared V3/V5 stratum selection. Historical exports retain their recorded rule."""
+"""Select tissue and panel-specific gene fusion weights."""
 from .tissue import tissue_key
 import hashlib
 import json
@@ -14,11 +14,8 @@ def validate_gate_genes(gate, genes):
 
 
 def select_gate_source(gate, tissue, n_genes):
-    version = gate["version"]
-    if not version.startswith(("v3", "v5")):
-        raise ValueError(f"Unsupported gate version: {version}")
     width = "wide" if n_genes >= int(gate.get("panel_cut", 1000)) else "narrow"
-    fold = gate.get("tissue_casefold", not version.startswith("v3"))
+    fold = gate.get("tissue_casefold", False)
     normalise = tissue_key if fold else lambda t: t or ""
     strata = gate["strata"]
     minimum = int(gate.get("min_refs", 2))
@@ -36,11 +33,9 @@ def select_gate_source(gate, tissue, n_genes):
     own = f"{normalise(tissue)}|{width}"
     if own in keys:
         return keys[own]
-    if version.startswith("v3"):
-        order = gate.get("strata_order", list(strata))
-        return next((k for k in order if k in eligible and
-                     normalise(k.rsplit("|", 1)[0]) == normalise(tissue)), "global")
-    return keys.get(f"*|{width}", "global")
+    order = gate.get("strata_order", list(strata))
+    return next((k for k in order if k in eligible and
+                 normalise(k.rsplit("|", 1)[0]) == normalise(tissue)), "global")
 
 
 def select_gate(gate, tissue, n_genes):

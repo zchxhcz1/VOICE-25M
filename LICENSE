@@ -25,5 +25,5 @@ Third-party components
 
 UNI2-h (MahmoodLab) is downloaded separately by the user under its own licence, which
 restricts commercial use and requires accepting the model card's terms.
-voice/_se2_arch.py and voice/_nb_head.py contain the SE(2)-equivariant decoder and the
+voice/_se2_arch.py and voice/head.py contain the SE(2)-equivariant decoder and the
 negative-binomial head contributed by Yicheng Tao as part of this work.

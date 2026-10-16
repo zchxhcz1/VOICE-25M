@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Encode measured reference slides and write full-cell comm100 builder inputs."""
+"""Encode reference slides and prepare features and expression for bank construction."""
 from pathlib import Path
 import argparse
 import json

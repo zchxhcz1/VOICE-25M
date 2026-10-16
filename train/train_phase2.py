@@ -14,7 +14,7 @@ def main():
                 '--target_cells':128,'--context_cells':64,'--workers':8,'--lora_ckpt':a.stage1,
                 '--train_objects':','.join(ids),'--gene_emb':'scgpt','--free_head':None,
                 '--free_init':'emb','--d4':0,'--grad_ckpt':None})
-    from train_se2_live import main as run
+    from stage2 import main as run
     run()
 
 

@@ -12,7 +12,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     for key in ['uni2h','stage1','stage2','space','out']:
         p.add_argument('--'+key,required=True)
-    p.add_argument('--bank');p.add_argument('--gate');p.add_argument('--xenium-space')
+    p.add_argument('--bank');p.add_argument('--beta','--gate',dest='gate');p.add_argument('--xenium-space')
     a=p.parse_args()
     from voice.retrieval import sha
     out=Path(a.out).resolve()
@@ -23,12 +23,12 @@ def main():
     for key,source in [('stage1',a.stage1),('stage2',a.stage2),('gene_space',a.space)]:
         shutil.copy2(source,out/config[key])
     shutil.copytree(a.uni2h,out/'uni2h')
-    if bool(a.bank)!=bool(a.gate):raise ValueError('Supply both --bank and --gate')
+    if bool(a.bank)!=bool(a.gate):raise ValueError('Supply both --bank and --beta')
     if a.bank:
         shutil.copytree(a.bank,out/'bank',symlinks=False)
-        shutil.copy2(a.gate,out/'gate_v3.json')
-        shutil.copy2(Path(a.gate).with_suffix('.meta.json'),out/'gate_v3.meta.json')
-        config.update(bank='bank',gate='gate_v3.json')
+        shutil.copy2(a.gate,out/'beta.json')
+        shutil.copy2(Path(a.gate).with_suffix('.meta.json'),out/'beta.meta.json')
+        config.update(bank='bank',gate='beta.json')
     if a.xenium_space:
         import numpy as np
         genes=np.load(a.xenium_space,allow_pickle=False)['genes'].astype(str).tolist()

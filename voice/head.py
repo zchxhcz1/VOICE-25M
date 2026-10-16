@@ -1,4 +1,4 @@
-"""25M negative-binomial expression head."""
+"""Negative-binomial expression head."""
 import math
 import numpy as np
 import torch
@@ -28,10 +28,6 @@ class DirectHead(nn.Module):
         super().__init__()
         G, D = gene_emb.shape
         self.register_buffer("E", torch.as_tensor(gene_emb, dtype=torch.float32))
-        # free_head: the gene rows become a learnable [G, D] matrix W, so logit[g] = <z, w_g> + b[g].
-        # free_init="emb" starts W from the table passed as gene_emb (scGPT gene embeddings for the abl5m winner,
-        # docs/scgpt_variant.md); "default" uses nn.Linear's init. Without free_head the table stays frozen,
-        # which is how live_nod4_c was trained (scFoundation pos_emb).
         self.W = None
         if free_head:
             self.W = nn.Parameter(torch.empty(G, D))
@@ -47,37 +43,7 @@ class DirectHead(nn.Module):
         self.b = nn.Parameter(torch.zeros(G))                       # gene main effect
         self.d = nn.Parameter(torch.zeros(n_plat)) if use_plat_main else None
         self.c = nn.Parameter(torch.zeros(n_plat, G)) if use_plat_gene else None
-        # size-factor exponent. mu = softplus(logit) * exp(gamma * area_rel); gamma = 1 hard-codes
-        # "counts scale linearly with area", but the measured within-slide slope of log(total count) on
-        # log(area) runs 0.47 (kidney) to 1.35 (HCC) over 13 objects, mean 0.93 -- so a fixed 1.0
-        # over-corrects the shallow slides by nearly 2x. One learnable scalar fixes the average.
-        #
-        # It is deliberately GLOBAL, not per-slide: a per-slide gamma has no value to look up on a new
-        # slide, the same reason the per-slide count median was rejected as a size factor. The residual
-        # slide-to-slide slope variation is not learnable in a deployable form; a gamma predicted from the
-        # image would be (tissue is visible), but that is a bigger change than this ablation needs.
-        # Global gamma is one free scalar: its gradient is sum(residual * area_rel), so it settles where the
-        # residual is uncorrelated with relative cell size. That removes the AVERAGE dependence and nothing
-        # more, and the measured within-slide slope spans 0.47 (kidney) to 1.35 (ovary Prime) -- 2.8x -- so a
-        # single value is a compromise that is wrong on both ends.
-        #
-        # gamma_from_z predicts it per cell from the image features instead. Deployable for the same reason
-        # the global one is: no metadata, no per-slide value to look up. The bias is initialised so that
-        # softplus(bias) = 1.0 and the weight at zero, so every cell starts at gamma = 1.0 exactly like the
-        # global arm -- the two differ only in whether gamma is allowed to vary.
         self.log_gamma = nn.Parameter(torch.zeros(())) if (learn_gamma and not gamma_from_z) else None
-        # BOUNDED, because the first attempt at this diverged. With gamma = softplus(w.z + b) there is no
-        # upper limit, and the size factor is exp(gamma * area_rel) with area_rel spanning about +-3: gamma
-        # only has to reach ~40 for exp() to overflow fp32. It did -- gamma went 1.055 -> 2.108 -> nan
-        # between steps 500 and 1500 and every metric collapsed to 0.
-        #
-        # A single global gamma cannot do this: 5.3M cells constrain one scalar, and it settled at 0.753.
-        # A per-cell gamma is barely constrained for cells whose area_rel is near zero -- the gradient in
-        # that direction vanishes -- so it is free to drift until it overflows.
-        #
-        # sigmoid bounds it to [lo, hi] instead. The measured within-slide slopes run 0.473-1.310, so
-        # [0.2, 2.0] is roomy: this constrains the failure mode, not the hypothesis. The bias is set so
-        # gamma starts at exactly 1.0, matching the global arm's initialisation.
         self.gamma_head = None
         self.gamma_lo, self.gamma_hi = 0.2, 2.0
         if gamma_from_z:
@@ -88,17 +54,7 @@ class DirectHead(nn.Module):
         self.log_theta = nn.Parameter(torch.zeros(G))               # per-gene NB dispersion
 
     def set_heldout(self, mask):
-        """mask[G] bool: genes whose OWN parameters must never be trained.
-
-        The head is logit[g] = <z, e_g> + b[g] + d[p] + c[p,g]. Everything gene-specific lives in b[g] and
-        c[p,g]; e_g is a frozen scFoundation row and z is shared. Zeroing the gradient of b[g] and c[p,g]
-        for a held-out set leaves those genes predictable ONLY through <z, e_g> -- which is the actual claim
-        behind "genes a slide's panel does not measure are still predictable". If held-out genes score near
-        the trained ones, the embedding head is doing the work; if they collapse, the cross-panel ability
-        was really coming from a free parameter per gene, and the claim needs restating.
-        """
-        # set_heldout is called AFTER .to(device), so a tensor built here stays on the CPU while the
-        # gradient arrives on the GPU. The mask is moved onto the gradient's own device inside the hook.
+        """Exclude selected gene-specific parameters from training gradients."""
         self.register_buffer("_held", torch.as_tensor(mask, dtype=torch.bool), persistent=False)
         keep = (~torch.as_tensor(mask, dtype=torch.bool)).float()
         self.b.register_hook(lambda g, k=keep: g * k.to(g.device))
@@ -110,15 +66,7 @@ class DirectHead(nn.Module):
         return [self.c] if self.c is not None else []
 
     def forward(self, h, plat, area_abs, area_rel, head_idx, neutral=False):
-        """neutral=True drops every platform-specific term, which is what predicting on a slide from NEITHER
-        platform requires -- a plain H&E section has no assay identity to look up.
-
-        The output-side terms are removable by construction: d[p] and c[p,g] are additive inside the softplus,
-        so zeroing them leaves b[g] carrying the platform-free gene level. plat_in is not: it feeds the MLP,
-        so substituting a zero vector is an out-of-distribution input rather than a neutral one. The mean
-        embedding is used instead, which is the least-bad choice and still not a principled neutral point.
-        That asymmetry is the reason plat_in and (d, c) are not interchangeable in the ablation: an arm can
-        win on the validation slides and still be the worse model for the deployment case."""
+        """Predict expected counts for the requested genes. neutral=True removes assay-specific output terms."""
         feats = [h]
         if self.use_plat_in:
             feats.append(self.plat_emb.weight.mean(0).expand(len(h), -1) if neutral

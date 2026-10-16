@@ -37,6 +37,7 @@ class Release:
                       (self.gate_meta['cache_fingerprint'], self.bank['cache_fingerprint']),
                       (self.gate_meta['gate_sha256'], sha(self.paths['gate']))]
             if any(a != b for a, b in checks):
-                raise ValueError('Stage-1, Stage-2, genes, bank and V3 gate identities do not match')
-            if not self.gate['version'].startswith('v3') or self.gate_meta.get('K') != 50:
-                raise ValueError('This release requires a comm100/K50 V3 gate')
+                raise ValueError('Model checkpoints, genes, reference bank and fusion weights do not match')
+            if (self.gate_meta.get('K') != self.bank['retrieval_K'] or
+                    self.gate_meta.get('tau') != self.bank['tau']):
+                raise ValueError('Fusion weights and reference bank retrieval settings differ')

@@ -12,7 +12,7 @@ def polygon_areas_um2(ip, vx, vy, um_per_px):
     return out * um_per_px ** 2
 
 def geometry(src, mpp_arg):
-    """(pos_um [N,2], area_abs, area_rel, mpp) -- the covariates train_direct.cell_areas / LiveStore build."""
+    """(pos_um [N,2], area_abs, area_rel, mpp) -- the covariates expression_head.cell_areas / LiveStore build."""
     if src.kind == "prepared":
         dj = os.path.join(src.dir, "dataset.json")
         mpp = mpp_arg or (float(json.load(open(dj))["um_per_pixel_source"]) if os.path.exists(dj) else None)

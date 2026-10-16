@@ -1,4 +1,4 @@
-"""Split and checkpoint checks used by the new training launchers."""
+"""Training splits and checkpoint consistency checks."""
 import hashlib
 import json
 from pathlib import Path
@@ -59,16 +59,6 @@ def check_stage1_identity(ck):
         raise ValueError('Stage-1 checkpoint identity differs from the Stage-2 initializer')
 
 
-def check_feature_provenance(root, ck, contract):
-    if contract is None:
-        return None
-    p = Path(root)/'PROVENANCE.json'
-    if not p.is_file():
-        raise ValueError('New run requires features with Stage-1 provenance')
-    provenance = json.loads(p.read_text())
-    if provenance.get('run_contract') != contract or provenance.get('checkpoint_identity') != ck.get('stage1_identity'):
-        raise ValueError('Retrieval features differ from the Stage-1 checkpoint used for Stage-2')
-    return provenance
 
 
 def stage1_steps(cells, epochs, world, chunk, accumulation, retain_tail=False):
@@ -92,7 +82,7 @@ def check_checkpoint(ck, contract, genes=None):
     if contract is None:
         return
     if ck.get('run_contract') != contract:
-        raise ValueError('Checkpoint belongs to an old/different split; start a fresh run')
+        raise ValueError('Checkpoint training split differs from the current corpus')
     if genes is not None and ck.get('gene_head_sha256') != gene_hash(genes):
         raise ValueError('Checkpoint gene-head order differs from this run')
 

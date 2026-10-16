@@ -1,4 +1,4 @@
-"""Stage-1 pooling, projection and data utilities from the 25M run."""
+"""Contrastive projection towers and cell-image data loading."""
 import os
 import numpy as np
 import pandas as pd
@@ -16,7 +16,6 @@ class HeTower(nn.Module):                 # Live UNI2-h feats -> LayerNorm handl
     def forward(self, x): return F.normalize(self.net(self.ln(x)), dim=-1)
 
 class ScfTower(nn.Module):
-    # Input width follows the target: 3072 for scFoundation (v25mfull), 512 for scGPT (clip_muon_ab --target scgpt).
     def __init__(self, mu, sd, d=128):
         super().__init__(); self.register_buffer("mu", mu); self.register_buffer("sd", sd)
         self.net = nn.Sequential(nn.Linear(mu.numel(), 512), nn.GELU(), nn.Linear(512, d))

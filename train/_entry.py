@@ -21,7 +21,7 @@ def arguments(stage):
     root = Path(a.work_dir).resolve()
     root.mkdir(parents=True,exist_ok=True)
     values = {'VOICE_ROOT':root, 'VOICE_DATASET':Path(a.dataset).resolve(),
-              'VOICE_CKDIR':root/'clip_ab/ckpts', 'VOICE_UNI2H':Path(a.uni2h).resolve(),
+              'VOICE_CKDIR':root/'checkpoints/alignment', 'VOICE_UNI2H':Path(a.uni2h).resolve(),
               'VOICE_FEAT':root/'features', 'VOICE_TRAIN_CACHE':root/'cache'}
     if a.cell_embeddings:
         values['VOICE_SCGPT_EMB'] = Path(a.cell_embeddings).resolve()

@@ -1,4 +1,4 @@
-"""Stage-2 live LoRA, SE(2) and expression-head training."""
+"""Train the image encoder, spatial decoder and expression head."""
 from __future__ import annotations
 import os, sys, json, time, argparse, types, glob, math
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -9,22 +9,21 @@ import torch.distributed as dist
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 
-import clip_muon_ab as M
+import stage1 as M
 from voice.training_contract import dataset_contract, check_members, check_checkpoint, gene_hash, checkpoint_identity, load_lora_checked, check_stage1_identity, stage2_steps
 from voice.tissue import object_directory
 from voice.full_coverage import CoveragePlan, FullCoverageDataset, supervised_sums, REVISION as COVERAGE_REVISION
 C = M.C
-from train_direct import DirectHead, nb_nll, cell_areas
-from se2_loop import LoopedSE2Transformer
-from extract_uni2_feat import cells_of
+from expression_head import DirectHead, nb_nll, cell_areas
+from spatial import LoopedSE2Transformer
+from cell_inputs import cells_of
 
 R = os.environ.get("VOICE_ROOT", "runs")
 FEAT = os.environ.get("VOICE_FEAT", "runs/features")
-CKDIR = f"{R}/direct/ckpts_se2live"
+CKDIR = f"{R}/checkpoints/expression"
 SPACE = f"{R}/direct/gene_space_all.npz"
 
 
-# ------------------------------------------------------------------ data
 
 class LiveStore:
     """One object: crop paths, 16x16 cmask weights, micron positions, panel counts, areas, kNN sampler.
@@ -35,8 +34,6 @@ class LiveStore:
     """
 
     def __init__(self, obj, d, plat, space, aux_flag, n_nb, max_cells=0):
-        # build_mask_cache.py stores the rasterised 16x16 weights next to features.npz. Without it every rank
-        # of every run re-rasterises the corpus at 3,538 cells/s -- two hours before the first step.
         cm = f"{FEAT}/{'cosmx' if plat else 'xenium'}/{obj}/cmask.npz"
         if os.path.exists(cm):
             z = np.load(cm)
@@ -47,16 +44,10 @@ class LiveStore:
             W = W / np.clip(W.sum((1, 2), keepdims=True), 1e-8, None)
         else:
             paths, W, er, pos_px = cells_of(d)
-        # cells_of returns y_pixel/x_pixel in SOURCE pixels, so the scale is um_per_pixel_SOURCE (0.1369-0.4812
-        # across the corpus), not um_per_pixel_output (0.2455 everywhere, the resampled patch frame that
-        # cell_areas uses). Getting these two the wrong way round rescales every neighbourhood radius by up to
-        # 2x and moves it into a different part of the Gaussian distance basis.
         ums = float(json.load(open(f"{d}/dataset.json"))["um_per_pixel_source"])
         pos = pos_px * ums                                            # -> microns
         rows = np.arange(len(er))          # positions into features.npz; narrowed by max_cells below
         if max_cells and len(er) > max_cells:
-            # a contiguous square, not a random subsample: subsampling stretches the kNN radius by
-            # 1/sqrt(frac) and pushes it past max_dist into the saturated tail of the Gaussian basis
             lo = pos.min(0); span = pos.max(0) - lo
             side = float(np.sqrt(max_cells / len(er)) * np.sqrt(span[0] * span[1]))
             rng = np.random.RandomState(0); best = None
@@ -68,9 +59,6 @@ class LiveStore:
             keep = best
             paths = [paths[i] for i in keep]; W = W[keep]; er = er[keep]; pos = pos[keep]
             rows = keep
-        # paths as a numpy bytes array, not a Python list: 25.9M str objects carry per-element refcounts, and
-        # every forked DataLoader worker that touches one copies its page. numpy holds a single refcount for
-        # the whole buffer, so the workers share it. Also 4.5 GB instead of 5.9 GB per rank.
         cache=os.environ.get('VOICE_TRAIN_CACHE')
         if cache:
             from voice.training_cache import cached_arrays, file_stamp, array_stamp
@@ -82,12 +70,7 @@ class LiveStore:
             W=cached_arrays(f'{cache}/stage2/{obj}/masks',signature,build_masks)['W']
         self.paths, self.W, self.pos = np.array(paths, dtype=np.bytes_), W, pos
         self._t = torch.from_numpy(pos)
-        # Positions into features.npz's arrays, so a caller can line these cells up with the cached 1536-d
-        # embeddings. The Stage-3 reference fitting needs it: A and R must be scored on the same cells, and
-        # `er` holds expression-row IDs, which index the expression matrix rather than the feature array.
         self.rows = np.asarray(rows, np.int64)
-        # Expression-row IDs in store order. Feature stores written by other code paths (cells_of vs cmask.npz)
-        # are aligned through these rather than trusted to share an order.
         self.expr_rows = np.asarray(er, np.int64)
 
         X = sp.load_npz(f"{d}/expression.npz")
@@ -160,7 +143,6 @@ def one(b):
     return b[0]                                       # batch_size=1: a neighbourhood is already the batch
 
 
-# ------------------------------------------------------------------ model
 
 class SE2Live(nn.Module):
     def __init__(self, enc, gene_emb, d_model=256, n_layers=6, span=0.0, r=1, max_dist=137.0, **head_kw):
@@ -225,7 +207,6 @@ def freeze_first_lora(enc, nblocks, frac):
     return nfz, fz
 
 
-# ------------------------------------------------------------------ eval
 
 class EvalDS(Dataset):
     """(store, anchor) pairs for evaluation, decoded by worker processes.
@@ -302,7 +283,6 @@ def evaluate(model, stores, dev, n_anchor, workers=8, hvg_k=(50, 200)):
     return agg, out
 
 
-# ------------------------------------------------------------------ main
 
 def main():
     ap = argparse.ArgumentParser()
@@ -320,14 +300,11 @@ def main():
     ap.add_argument("--n_nb", type=int, default=128)
     ap.add_argument("--max_cells", type=int, default=400000)
     ap.add_argument("--max_dist", type=float, default=137.0)
-    # architecture: the frozen sweep's optimum (B.10). d_model 512 was worst there but is VOICE's own value,
-    # and the sweep's ranking was measured with the encoder frozen -- it need not survive unfreezing.
     ap.add_argument("--d_model", type=int, default=256)
     ap.add_argument("--n_layers", type=int, default=6)
     ap.add_argument("--span", type=float, default=0.0)
     ap.add_argument("--loop_r", type=int, default=1)
-    # encoder
-    ap.add_argument("--lora_ckpt", default=f"{R}/clip_ab/ckpts/stage1_final.pt")
+    ap.add_argument("--lora_ckpt", default=f"{R}/checkpoints/alignment/stage1_final.pt")
     ap.add_argument("--nblocks", type=int, default=12)
     ap.add_argument("--lora_r", type=int, default=16)
     ap.add_argument("--lora_alpha", type=int, default=32)
@@ -344,8 +321,6 @@ def main():
     ap.add_argument("--eval_workers", type=int, default=8)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--resume", default="", help="restore weights/optimizer and finish the remaining fixed-epoch steps; same world size")
-    # gene read-out. Defaults reproduce live_nod4_c (frozen scFoundation table). The abl5m winner is
-    # --gene_emb scgpt --free_head --free_init emb (docs/scgpt_variant.md).
     ap.add_argument("--gene_emb", default="scf", help="scf | scgpt | path to an .npz table (see gene_table)")
     ap.add_argument("--free_head", action="store_true", help="learnable gene rows instead of a frozen table")
     ap.add_argument("--free_init", choices=["emb", "default"], default="emb",
@@ -448,10 +423,6 @@ def main():
     log(f"[se2] {model.se2.describe()}")
     log(f"[head] gene table {a.gene_emb} {tuple(table.shape)} | "
         + (f"learnable rows, init {a.free_init}" if a.free_head else "frozen rows"))
-    # Weights are restored before the optimizer is built, so its parameter groups point at the restored
-    # tensors. AdamW's moments come back only if the checkpoint carried them -- the ones written before this
-    # flag existed did not, and then the first few hundred steps rebuild the moments and their evals should
-    # not be read as the model's level.
     rk = None
     if a.resume:
         rk = torch.load(a.resume, map_location="cpu", weights_only=False)
@@ -481,8 +452,6 @@ def main():
 
     net = model
     if ddp:
-        # broadcast_buffers=False: head.E is a fixed 18,580 x 768 float32 buffer (57 MB) and DDP would
-        # re-broadcast it every step for nothing. Nothing here has a buffer that changes during training.
         net = nn.parallel.DistributedDataParallel(model, device_ids=[int(os.environ["LOCAL_RANK"])],
                                                   gradient_as_bucket_view=True, broadcast_buffers=False)
 

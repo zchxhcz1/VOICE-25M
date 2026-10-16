@@ -1,4 +1,4 @@
-"""Stage-1 scGPT alignment with AdamW, D4 and complete cell coverage."""
+"""Train image and RNA feature alignment."""
 from __future__ import annotations
 import os, sys, json, time, argparse, types, hashlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -9,7 +9,7 @@ import torch.distributed as dist
 from datetime import timedelta
 from torch.utils.data import DataLoader, DistributedSampler
 
-import clip_lora as C
+import contrastive as C
 
 from contrast_losses import ContrastLoss
 import timm
@@ -22,8 +22,8 @@ SCF_ROOTS = [
     f"{SCF_EMB}/xenium",
     f"{SCF_EMB}/cosmx",
 ]
-SCF_ROOT = SCF_EMB  # legacy, kept for callers
-CKDIR = os.environ.get("VOICE_CKDIR", "runs/clip_ab/ckpts")
+SCF_ROOT = SCF_EMB 
+CKDIR = os.environ.get("VOICE_CKDIR", "runs/checkpoints/alignment")
 UNI2H = os.environ.get("VOICE_UNI2H", "weights/uni2h")
 
 
@@ -32,7 +32,6 @@ def build_uni2_local(dev, path=UNI2H):
     return build(dev, path)
 
 
-# ------------------------------------------------------------------ data
 def scf_path(slide, n_expr=None):
     """First embedding for `slide` across SCF_ROOTS; with n_expr given, the first whose row count matches.
 
@@ -46,9 +45,6 @@ def scf_path(slide, n_expr=None):
     return None
 
 
-# Stage-1 alignment target. scf: scFoundation cell embeddings (3072-d, v25mfull). scgpt: scGPT whole-human <cls>
-# embeddings (512-d) from scgpt_cellemb.py, ROW-ALIGNED with expression.npz like scf_cellemb.npy; the abl5m
-# ablation chose this target (docs/scgpt_variant.md). Set by main() from --target.
 SCGPT_EMB = os.environ.get("VOICE_SCGPT_EMB", "")
 TARGET = "scf"
 
@@ -83,7 +79,7 @@ def usable_slides(split, platform="xenium"):
 
 
 def build_data(slides, max_cells, seed):
-    """Same construction as clip_lora.build_data, but enumerating the new tree instead of SourceCache."""
+    """Load row-aligned image crops, masks and RNA targets."""
     per = max(1, max_cells // max(len(slides), 1)) if max_cells else 2**62
     cache=os.environ.get('VOICE_TRAIN_CACHE')
     if cache:
@@ -115,7 +111,6 @@ def build_data(slides, max_cells, seed):
     return paths, np.concatenate(W_l), np.concatenate(scf_l)
 
 
-# ------------------------------------------------------------------ D4 augmentation
 class D4Wrap(torch.utils.data.Dataset):
     """A random element of D4 (4 rotations x 2 flips) applied to (crop, mask) TOGETHER.
 
@@ -138,11 +133,6 @@ class D4Wrap(torch.utils.data.Dataset):
         self.cycle = cycle
         self.epoch = 0
         if cycle:
-            # Sampling the 8 elements with replacement collides: after n exposures a cell has seen only
-            # 8*(1-(7/8)^n) distinct ones -- 3.96 at 5.12 epochs, and 21.7 exposures are needed to expect
-            # all 8. Cycling a per-cell permutation gives exactly min(n,8) instead, so 8 epochs covers the
-            # orbit exactly once. It has to be a stateless function of (index, epoch): with num_workers>0
-            # each worker forks its own copy of this object, so a counter would count independently in each.
             rng = np.random.default_rng(seed)
             self.perm = np.stack([rng.permutation(8) for _ in range(len(base))]).astype(np.uint8)
 
@@ -170,7 +160,6 @@ class D4Wrap(torch.utils.data.Dataset):
         return img.contiguous(), W.contiguous(), scf
 
 
-# ------------------------------------------------------------------ optimizers
 class MultiOpt:
     """Two optimizers driven as one. gradcache_step only needs zero_grad/step."""
 
@@ -199,7 +188,7 @@ class MultiOpt:
 
 
 
-def build_optimizer(kind, model, he_tower, scf_tower, lr_lora, lr_tower, wd, adjust_on="param", loss_params=()):
+def build_optimizer(kind, model, he_tower, scf_tower, lr_lora, lr_tower, wd, loss_params=()):
     if kind != 'adamw':
         raise ValueError('The released 25M recipe uses AdamW')
     lora = [p for p in model.parameters() if p.requires_grad]
@@ -210,27 +199,13 @@ def build_optimizer(kind, model, he_tower, scf_tower, lr_lora, lr_tower, wd, adj
     return MultiOpt([opt])
 
 
-# ------------------------------------------------------------------ distributed
 def gradcache_step_ddp(chunks, model, he_tower, scf_tower, opt, world, lossfn, clip_norm=1.0):
-    """clip_lora.gradcache_step with the all-reduce VOICE's own train_phase1.py uses.
-
-    Standard DistributedDataParallel is wrong here and the repo says so: GradCache issues one backward PER
-    CHUNK, and DDP's autograd hooks would all-reduce on every one of them -- wrong semantics, since a chunk's
-    gradient is only a partial sum, and eight times the traffic. The gradients are instead reduced ONCE, after
-    the last chunk, exactly as train_phase1.py:270-273.
-
-    eff_batch stays PER RANK, so the InfoNCE negative pool and hence the task difficulty are unchanged from a
-    single-card run; what doubles is the number of gradient samples behind each optimiser step.
-    """
+    """Compute contrastive gradients in chunks and synchronize across ranks."""
     with torch.no_grad(), torch.autocast("cuda", dtype=C.AMP_DTYPE):
         Zi = [C.he_embed(model, he_tower, b[0], b[1]).float() for b in chunks]
         Zg = [scf_tower(b[2].to(C.dev, non_blocking=True)).float() for b in chunks]
     zi = torch.cat(Zi).detach().requires_grad_(True)
     zg = torch.cat(Zg).detach().requires_grad_(True)
-    # zero_grad must come BEFORE this backward: SigLIP and the learnable-temperature arm carry loss
-    # parameters, they receive their ONLY gradient here in pass 2 (pass 3 re-forwards the towers, not the
-    # loss), and zeroing afterwards would silently discard it -- the temperature would never move and the
-    # arm would be a slow re-run of the baseline.
     opt.zero_grad(set_to_none=True)
     if len(chunks[0])==4:
         mask=torch.cat([b[3] for b in chunks]).to(C.dev)
@@ -261,7 +236,6 @@ def gradcache_step_ddp(chunks, model, he_tower, scf_tower, opt, world, lossfn, c
     return float(loss.detach())
 
 
-# ------------------------------------------------------------------ eval
 @torch.no_grad()
 def evaluate(model, he_tower, scf_tower, loader, max_batches=200, world=1):
     """Val InfoNCE + in-batch R@1 both directions. Fixed batches (drop_last) so it is comparable across steps.
@@ -272,9 +246,6 @@ def evaluate(model, he_tower, scf_tower, loader, max_batches=200, world=1):
     picking a sampling spike. Using the whole val set instead takes the error to ~0.0018.
     """
     model.eval(); he_tower.eval(); scf_tower.eval()
-    # max_batches is a GLOBAL budget: the val set is sharded by DistributedSampler, so leaving it per-rank
-    # would make the 2-GPU eval cover 2x the cells of the 1-GPU eval and break comparability with the
-    # earlier single-GPU runs.
     max_batches = max(1, -(-max_batches // world))
     losses, n = [], 0
     hit = {("i", k): 0 for k in (1, 5, 10)} | {("g", k): 0 for k in (1, 5, 10)}
@@ -286,9 +257,6 @@ def evaluate(model, he_tower, scf_tower, loader, max_batches=200, world=1):
             zg = scf_tower(scf.to(C.dev, non_blocking=True)).float()
         losses.append(float(C.infonce(zi, zg)))
         logits = zi @ zg.t(); lab = torch.arange(len(zi), device=zi.device)
-        # rank of the true partner, not just whether it won. R@1 throws away everything about the near
-        # misses, so it is a binomial with se sqrt(p(1-p)/n); the rank distribution uses the whole ordering
-        # and its median moves far less between evals.
         for tag, lg in (("i", logits), ("g", logits.t())):
             true = lg.gather(1, lab[:, None])
             rk = (lg > true).sum(1) + 1                      # 1 = correct partner is top-1
@@ -300,21 +268,15 @@ def evaluate(model, he_tower, scf_tower, loader, max_batches=200, world=1):
     ri = np.concatenate(ranks_i) if ranks_i else np.array([1])
     rg = np.concatenate(ranks_g) if ranks_g else np.array([1])
     if world > 1:
-        # every rank scored a different shard of the val set; sum the counts so the reported metric is over
-        # the whole set rather than 1/world of it, and so all ranks agree (early stopping must not diverge)
         t = torch.tensor([float(np.sum(losses)), float(len(losses)), float(n)]
                          + [float(hit[(g, k)]) for g in ("i", "g") for k in (1, 5, 10)]
                          + [float(np.sum(ri)), float(np.sum(1.0 / ri)),
                             float(np.sum(rg)), float(np.sum(1.0 / rg))],
                         device=C.dev, dtype=torch.float64)   # float32 loses integers past 2^24; the rank
-                        # sum over 390k cells at mean rank ~58 is 2.3e7, already past that
         dist.all_reduce(t, op=dist.ReduceOp.SUM); t = t.cpu().numpy()
         losses_sum, n_batch, n = t[0], t[1], int(t[2])
         for j, (g, k) in enumerate([(g, k) for g in ("i", "g") for k in (1, 5, 10)]):
             hit[(g, k)] = float(t[3 + j])          # np scalar otherwise -> not JSON serializable
-        # t[9] / t[11] are SUMS of ranks, so dividing gives the MEAN rank, not the median -- a median cannot
-        # be recovered from per-rank medians or sums at all. Mean rank is reported instead, and is the honest
-        # name for what this number is; the rank distribution is heavy-tailed so the two differ a lot.
         out = {"val_infonce": float(losses_sum / max(n_batch, 1)), "val_cells": n,
                "mean_rank_he2scf": float(t[9] / max(n, 1)), "mean_rank_scf2he": float(t[11] / max(n, 1)),
                "mrr_he2scf": float(t[10] / max(n, 1)), "mrr_scf2he": float(t[12] / max(n, 1))}
@@ -331,23 +293,17 @@ def evaluate(model, he_tower, scf_tower, loader, max_batches=200, world=1):
     return out
 
 
-# ------------------------------------------------------------------ main
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--optimizer", choices=["adamw"], required=True)
     ap.add_argument("--save_every", type=int, default=0,
-                    help="also checkpoint every N steps, tagged with the step. Stage-1 in-batch\n                         retrieval is a PROXY: it peaked at 0.48 epoch on the 25M run while train\n                         loss kept falling, so selecting `best` on it discards a model that has\n                         seen every cell. Keeping the trajectory lets Stage 2/3 pick instead.")
+                    help='Save a training checkpoint every N steps.')
     ap.add_argument("--target", choices=["scf", "scgpt"], default="scf",
-                    help="alignment target: scFoundation (default, v25mfull) or scGPT cell embeddings "
-                         "(needs VOICE_SCGPT_EMB, see scgpt_cellemb.py)")
+                    help='RNA embedding target: scFoundation or scGPT.')
     ap.add_argument("--platforms", default="xenium,cosmx",
-                    help="comma-separated; both by default now that CosMx is embedded")
+                    help='Comma-separated assay platforms.')
     ap.add_argument("--loss", choices=["infonce", "siglip", "dcl", "learntemp"], default="infonce",
-                    help="Stage-1 contrastive objective. Training-loss VALUES are not comparable "
-                         "across these; eval always uses fixed-temperature InfoNCE, so val_infonce "
-                         "and R@k are.")
-    ap.add_argument("--adjust_on", choices=["param", "block"], default="block",
-                    help="shape setting the match_rms_adamw factor. block = step size matched to whole-tensor Muon (the clean granularity ablation); param = also inflates the step ~10x")
+                    help='Contrastive training objective.')
     ap.add_argument("--tag", required=True)
     ap.add_argument("--steps", type=int, default=2500)
     ap.add_argument("--max_cells", type=int, default=400000)
@@ -360,10 +316,7 @@ def main():
     ap.add_argument("--workers", type=int, default=8); ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--eval_every", type=int, default=250)
     ap.add_argument("--patience", type=int, default=0,
-                    help="stop after this many consecutive evals with no improvement in EITHER val_infonce "
-                         "or R@1 (0 = never stop early). Both must stall: the curves are jagged enough that "
-                         "one metric alone dips on noise -- Muon+D4's R@1 argmax landed on step 500 in one "
-                         "run and 3500 in another with identical settings.")
+                    help='Stop after N evaluations without improvement; 0 disables early stopping.')
     ap.add_argument("--uni2h", default=UNI2H, help="local UNI2-h dir (config.json + pytorch_model.bin)")
     ap.add_argument("--d4_cycle", action="store_true",
                     help="cycle a per-cell permutation of D4 instead of drawing with replacement, so n epochs "
@@ -388,14 +341,9 @@ def main():
         dist.init_process_group("nccl", timeout=timedelta(hours=4),
                                 device_id=torch.device(f"cuda:{local}"))
         C.dev = torch.device(f"cuda:{local}")
-    # identical on every rank and in every arm: the init_hash assertion depends on it
     torch.manual_seed(a.seed); np.random.seed(a.seed); torch.cuda.manual_seed_all(a.seed)
     os.makedirs(CKDIR, exist_ok=True)
 
-    # Both platforms. usable_slides defaults to xenium, and every run in this series before the scF
-    # embeddings were completed used that default -- with CosMx unembedded there was nothing to include.
-    # Now that all 101 objects are row-aligned, restricting to xenium would silently drop 13 training
-    # objects (1,649,619 cells) and 4 val objects.
     plats = [x for x in a.platforms.split(",") if x]
     tr = [o for p_ in plats for o in usable_slides("training_set", p_)]
     from voice.training_contract import dataset_contract, check_members, stage1_steps
@@ -406,7 +354,7 @@ def main():
         if a.max_cells or not a.retain_tail or not a.epochs:
             raise ValueError('New Stage1 requires all cells, explicit epochs and retained tail batches')
         if a.smoke:
-            raise ValueError('Use a separate legacy/synthetic dataset for smoke runs; do not label a partial run as dataset25m')
+            raise ValueError('Partial training is incompatible with a complete corpus training contract')
         if not a.no_validation:
             raise ValueError('New split requires --no_validation; cross-slide cannot be a validation pool')
         check_members(run_contract, 'stage1', [o for o,d in tr])
@@ -427,9 +375,6 @@ def main():
     mu, sd = C.scf_stats(scf)
     he_tower = C.HeTower().to(C.dev); scf_tower = C.ScfTower(mu, sd).to(C.dev)
 
-    # The A/B is only a test of the optimizer if both arms START from the same weights. LoRA A/B and the two
-    # towers are randomly initialised, so a difference in how much RNG was consumed before this point would
-    # silently make the arms incomparable. Stamp a hash of every trainable tensor; the two runs must match.
     h = hashlib.sha256()
     for n, t in sorted(list(C.trainable(model).items())
                        + [("he." + k, v) for k, v in he_tower.state_dict().items()]
@@ -440,15 +385,13 @@ def main():
 
     lossfn = ContrastLoss(a.loss).to(C.dev)
     opt = build_optimizer(a.optimizer, model, he_tower, scf_tower, a.lr_lora, a.lr_tower, a.wd,
-                          adjust_on=a.adjust_on, loss_params=list(lossfn.parameters()))
+                          loss_params=list(lossfn.parameters()))
     if r0: print(f"[loss] {a.loss} ({sum(q.numel() for q in lossfn.parameters())} learnable scalars)", flush=True)
 
     g = torch.Generator(); g.manual_seed(a.seed)                        # identical data ORDER in both arms
     tds = C.CLIPDS(paths, W, scf)
     if a.d4_aug:
         tds = D4Wrap(tds, cycle=a.d4_cycle, seed=a.seed)
-    # cycle mode needs the epoch to reach the workers, and persistent workers are never re-forked, so they
-    # would keep serving epoch 0 forever. Recreating them each epoch costs a few seconds.
     persist = a.workers > 0 and not (a.d4_aug and a.d4_cycle)
     if a.retain_tail:
         from voice.clip_coverage import TailDataset,ResumeTailSampler
@@ -459,11 +402,6 @@ def main():
                                   drop_last=True, seed=a.seed) if world > 1 else None
     dl = DataLoader(tds, batch_size=a.chunk, sampler=samp, shuffle=(samp is None), generator=g,
                     drop_last=not a.retain_tail, num_workers=a.workers, pin_memory=True, persistent_workers=persist)
-    # build_data concatenates slides in usable_slides order, so an unshuffled val loader hands out one slide
-    # at a time. evaluate() stops after max_batches, and 200 x 256 = 51,200 cells is less than the first
-    # slide holds -- every val number would come from breast_cancer alone, with kidney and pancreas never
-    # scored. A fixed permutation (same every eval, every arm, every rank, so the metric stays comparable)
-    # makes the scored prefix a random sample of the whole split instead.
     vperm = np.random.RandomState(12345).permutation(len(vpaths))
     vpaths = [vpaths[i] for i in vperm]; vW = vW[vperm]; vscf = vscf[vperm]
     vds = C.CLIPDS(vpaths, vW, vscf)
@@ -471,9 +409,6 @@ def main():
                                drop_last=True) if world > 1 else None
     vdl = DataLoader(vds, batch_size=a.chunk, sampler=vsamp, shuffle=False, drop_last=True,
                      num_workers=max(2, a.workers // 2), pin_memory=True)
-    # a second val pass on DETERMINISTICALLY rotated crops. Canonical val answers "did D4 help the orientation
-    # the model is scored on"; this one answers "did D4 buy rotation robustness", which is the thing D4 is for.
-    # It is reported by every arm, so the augmented and un-augmented arms stay comparable on both axes.
     vrsamp = DistributedSampler(D4Wrap(vds, fixed=True), num_replicas=world, rank=rank,
                                 shuffle=False, drop_last=True) if world > 1 else None
     vdl_rot = DataLoader(D4Wrap(vds, fixed=True), batch_size=a.chunk, sampler=vrsamp, shuffle=False,
@@ -552,19 +487,12 @@ def main():
                     json.dump({"args": vars(a), "init_hash": init_hash, "history": hist}, f, indent=2, default=float)
 
                 if r0 and a.save_every and step % a.save_every == 0:
-                    # opt state included so these are RESUMABLE. Without the AdamW moments, restarting from
-                    # a checkpoint zeroes the momentum and re-runs warmup: a different trajectory, not a
-                    # continuation. The 25M run's checkpoints lack it, which is why its rerun had to start
-                    # from scratch and pay 9h of recompute. Costs ~2x the parameter bytes (~35 MB here).
                     torch.save({"lora": C.trainable(model), "he_tower": he_tower.state_dict(),
                                 "scf_tower": scf_tower.state_dict(), "args": vars(a),
                                 "init_hash": init_hash, "step": step, "eval": ev,
                                 "opt": opt.state_dict()},
                                f"{CKDIR}/{a.tag}_step{step}.pt")
 
-                # best-so-far checkpoint, because with early stopping the last step is not the best one
-                # compare smoothed values: a single spike should neither reset the patience counter nor
-                # be recorded as the best point
                 k_sm = 3
                 sm_vi = float(np.mean([e["val_infonce"] for e in hist[-k_sm:]]))
                 sm_r1 = float(np.mean([e["R@1_he2scf"] for e in hist[-k_sm:]]))
@@ -601,7 +529,6 @@ def main():
         resume_cursor=None
 
     if resumed is not None:
-        # A checkpoint already at the fixed budget does not enter the training loop.
         restore_main_rng(resumed,rank,world)
     rng=capture_rng_per_rank()
     if r0:atomic_torch_save(saved_state(rng),f'{CKDIR}/{a.tag}_final.pt')

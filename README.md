@@ -1,123 +1,99 @@
 # VOICE-25M
 
-Predict single-cell gene expression from an H&E slide using UNI2-h, scGPT-aligned LoRA, an SE(2) spatial decoder, and k-means reference retrieval.
-
-This release uses **comm100 / K50 / V3**: approximately 100 cells per k-means cluster, 50 retrieved clusters per gene coverage group, temperature 0.03, and V3 per-gene fusion weights refitted for that bank. The gene head contains 18,580 genes. The `25M` name refers to the training-cell scale.
-
-[中文说明](docs/README_CN.md) · [Training](docs/training.md) · [Model artifacts](weights/README.md) · [Input/output formats](docs/formats.md) · [Validation](docs/validation.md)
+Predict single-cell gene expression from H&E images using an image encoder, a spatial decoder, and a reference bank of cells with measured expression.
 
 ## Resources
 
-- **Model:** [zchx/VOICE-25M](https://huggingface.co/zchx/VOICE-25M)
+- **Model:** [Hugging Face](https://huggingface.co/zchx/VOICE-25M)
+- **Paper:** [arXiv:2608.08366](https://arxiv.org/abs/2608.08366)
 
-## Install
+## Installation
 
-Python 3.10 or later; Python 3.11 is the tested environment. Install a CUDA-enabled PyTorch build appropriate for your machine, then:
+Use Python 3.10 or later and install a PyTorch build suitable for your hardware.
 
 ```bash
+git clone https://github.com/zchxhcz1/VOICE-25M.git
+cd VOICE-25M
 pip install -r requirements.txt
 ```
 
-For SVS/NDPI/MRXS, install the OpenSlide system library and `pip install openslide-python`. For very large TIFFs, use an OpenSlide-readable pyramidal TIFF; the array fallback loads TIFF/PNG/JPEG into host memory.
+For SVS, NDPI, or MRXS images, install the OpenSlide system library and `openslide-python`. PNG, JPEG, and TIFF images are also supported. Large slide images should use an OpenSlide-readable format to avoid loading the entire image into memory.
 
-UNI2-h weights require access to [MahmoodLab/UNI2-h](https://huggingface.co/MahmoodLab/UNI2-h). The automatic segmentation uses the original `cpsam` model described in the [Cellpose documentation](https://cellpose.readthedocs.io/en/latest/models.html); it downloads that checkpoint on first use. `--segment-model` selects a local checkpoint for offline use.
+## Download the model
 
-## Predict from one H&E image
+Download the checkpoints, fusion weights, gene information, and reference bank from Hugging Face. UNI2-h requires separate access through [MahmoodLab/UNI2-h](https://huggingface.co/MahmoodLab/UNI2-h).
 
-Obtain a compatible model release following [weights/README.md](weights/README.md). The source repository contains code and the calibrated beta JSON; large neural weights and the reference bank are separate artifacts. No target RNA, cell coordinates, masks, precomputed features, or training corpus are required.
-
-Download the VOICE checkpoints, V3 beta and matching bank from [zchx/VOICE-25M](https://huggingface.co/zchx/VOICE-25M), then obtain the original UNI2-h weights from its official gated repository:
+After receiving UNI2-h access, authenticate with your own Hugging Face account:
 
 ```bash
 hf auth login
 python - <<'PYTHON'
 from huggingface_hub import snapshot_download, hf_hub_download
-release_dir = "/models/voice25m"
-snapshot_download(repo_id="zchx/VOICE-25M", local_dir=release_dir)
-hf_hub_download("MahmoodLab/UNI2-h", "pytorch_model.bin", local_dir=f"{release_dir}/uni2h")
+
+model_dir = "models/voice25m"
+snapshot_download("zchx/VOICE-25M", local_dir=model_dir)
+hf_hub_download("MahmoodLab/UNI2-h", "pytorch_model.bin", local_dir=f"{model_dir}/uni2h")
 PYTHON
 ```
 
-Use your own Hugging Face account with approved UNI2-h access. The original UNI2-h base weights are not redistributed in the VOICE repository. The downloaded release contains relative paths and is ready for inference once `uni2h/pytorch_model.bin` has been added.
+See [model files](weights/README.md) for the directory structure.
+
+## Prediction
+
+Run prediction from a single H&E image:
 
 ```bash
 python predict/predict.py \
-  --image /data/my_slide.svs \
-  --release /models/voice25m \
-  --out /results/my_slide.h5ad
+  --image /path/to/slide.svs \
+  --release models/voice25m \
+  --out results/prediction.h5ad
 ```
 
-The command reads physical resolution from the WSI metadata, segments nuclei, constructs 55 µm crops and mask weights, runs the direct branch and comm100/K50 retrieval, applies V3 beta, and writes AnnData. The segmentation is also saved next to the output as `my_slide.cells.npz`.
+The command segments nuclei, extracts cell-centered image crops, predicts expression, retrieves reference expression, and combines both predictions. It also saves the segmentation beside the output. The first segmentation run downloads the Cellpose model; use `--segment-model` to provide local segmentation weights.
 
-For PNG/JPEG or an image without physical resolution metadata, supply the actual microns per pixel:
+If the image does not contain physical resolution metadata, supply its actual microns per pixel:
 
 ```bash
-python predict/predict.py --image /data/he.png --mpp 0.25 \
-  --release /models/voice25m --out /results/he.h5ad
+python predict/predict.py --image /path/to/image.png --mpp 0.25 \
+  --release models/voice25m --out results/prediction.h5ad
 ```
 
-`0.25` is an example, not an assumed scanner resolution. Unknown resolution produces an actionable error. Automatic segmentation estimates nuclei; supplied cell boundaries can better match the cell masks used in training.
+`0.25` is an example. Use the resolution of your image. Prediction requires no measured expression or precomputed image features for the target slide.
 
-Useful options:
+| Option | Purpose |
+| --- | --- |
+| `--cells cells.npz` | Use existing cell boundaries instead of automatic segmentation |
+| `--prepared /path/to/slide` | Read prepared cell crops and boundaries instead of `--image` |
+| `--tissue xenium_lung` | Select tissue-specific fusion weights; omitted or unknown tissue uses global weights |
+| `--genes all` | Predict all 18,580 model genes; this is the default |
+| `--genes genes.txt` | Predict an ordered list of gene symbols, one per line |
+| `--direct-only` | Predict with the image model without reference retrieval |
+| `--save-embeddings` | Save image and spatial features |
+| `--enc-chunk 32 --query-batch 64` | Reduce transient GPU memory use |
+| `--sample-id SAMPLE --exclude RELATED_SAMPLE` | Exclude the target and related references when they occur in the bank |
 
-- `--tissue xenium_lung`: select tissue-specific beta; omitted or unrecognized tissue uses global beta. Keys are listed in `weights/gate_v3.json`.
-- `--genes all` (default), `--genes xenium`, or `--genes /data/genes.txt`: select the output panel. V3 panel width is the number of requested output genes.
-- `--cells /data/cells.npz`: use existing segmentation, bypassing automatic segmentation.
-- `--prepared /data/prepared_slide`: use prepared cell crops instead of `--image`.
-- `--direct-only`: run the direct branch without a bank or gate.
-- `--save-embeddings`: retain Stage-1/Stage-2 features and decoder embeddings.
-- `--enc-chunk 32 --query-batch 64`: lower transient GPU memory use. The complete bank still needs to fit on the selected device.
-- `--sample-id SAMPLE --exclude RELATED_SAMPLE`: exclude the target and related donor/block references. Supply identity explicitly when filenames differ from bank object IDs.
+CUDA is the default device. CPU inference is available with `--device cpu --amp fp32`. Prediction matrices are written to disk in batches; output size scales with the number of cells and requested genes. Automatic segmentation produces nuclei; use supplied cell boundaries when available.
 
-The default device is CUDA. CPU inference is available with `--device cpu --amp fp32` and can be slow. Output matrices are written in batches, so a whole slide's dense expression matrices do not have to fit in RAM. Disk use scales with cells × requested genes; each float32 matrix needs about 4 × N × G bytes before compression.
-
-## Outputs and fusion
+## Output
 
 ```python
 import anndata as ad
-prediction = ad.read_h5ad('/results/my_slide.h5ad')
-print(prediction.shape)
-print(prediction.obsm['spatial'])  # x,y in source-image pixels
+prediction = ad.read_h5ad("results/prediction.h5ad")
 ```
 
-| Field | Meaning |
+| Field | Contents |
 | --- | --- |
-| `X` | V3 fused gene scores; direct predictions in direct-only mode |
-| `layers['A']` | Direct `log1p(mu)` predictions |
-| `layers['R']` | Retrieved per-reference z scores; NaN for unsupported genes |
-| `var['beta']` | Applied weight per gene |
-| `var['covered']` | Whether the eligible bank measures the gene |
-| `obsm['spatial']` | Cell centroids in source-image pixels, x then y |
-| `uns['voice25m']` | Model hashes, bank fingerprint, geometry and fusion metadata |
+| `X` | Combined gene-expression scores |
+| `layers['A']` | Direct predictions in `log1p(mu)` scale |
+| `layers['R']` | Reference expression scores; NaN where reference coverage is unavailable |
+| `var['beta']` | Applied fusion weight for each gene |
+| `var['covered']` | Reference coverage for each gene |
+| `obsm['spatial']` | Cell centroids as x,y coordinates in source-image pixels |
 
-`X_g = beta_g * A_g + (1-beta_g) * R_g`. Missing retrieval coverage or an unfitted beta uses A. A and R retain their original scales. Fused values describe within-gene cell rankings and spatial patterns; they are not absolute molecule counts. Use A when the direct expression scale is needed.
+The combined score is `beta * A + (1 - beta) * R`. Genes without reference coverage or fitted weights use the direct prediction. Combined scores describe variation across cells within each gene; they are not molecule counts. In direct-only mode, `X` contains the direct prediction.
 
-V3 first selects the same tissue and panel width (wide ≥1,000 genes), then the first eligible stratum of the same tissue with another width, then global beta. This version case-folds tissue keys, requires at least two references per stratum, and averages gene-wise beta over references with equal reference weight. Model/bank/gene/gate identities are checked before fused inference.
+## Training
 
-## Training and building your own release
+[Training instructions](docs/training.md) cover RNA embedding preparation, image–RNA alignment, expression training, reference-bank construction, and fitting fusion weights. Training requires paired H&E images and measured spatial expression.
 
-[docs/training.md](docs/training.md) covers scGPT target preparation, the two training phases, bank construction, reference-only V3 fitting, and portable release export. Training needs paired H&E and measured spatial expression; prediction of a new slide does not.
-
-```text
-voice/      model, retrieval, fusion, training utilities
-train/      preparation, Stage-1, Stage-2, beta fitting, release export
-predict/    image reading, automatic segmentation, inference, bank construction
-configs/    portable release example
-weights/    calibrated V3 beta and artifact instructions
-tests/     numerical and input-contract regression tests
-```
-
-Downstream analysis, clinical prediction, paper plots, benchmark exports, training datasets and local scheduler scripts are excluded.
-
-## Citation
-
-The code follows [VOICE_HE_ST_Pred](https://github.com/Luosanj/VOICE_HE_ST_Pred). See [provenance](docs/provenance.md) for this 25M version.
-
-```bibtex
-@article{luo2026voice,
-  title={VOICE: A Vision-Omics Foundation Model Integrating Direct and Retrieval-Based Prediction of In-situ Single-Cell Gene Expression},
-  author={Luo, Xin and Tao, Yicheng and Zeng, Haoxuan and Wang, Suyuan and Ouyang, Chenzi and Zhu, Meiqi and Liu, Kai and Chen, Shuibing and Liu, Jie},
-  journal={arXiv preprint arXiv:2608.08366},
-  year={2026}
-}
-```
+[Input formats](docs/formats.md) describe image geometry, prepared-slide files, reference-bank inputs, and output coordinates.

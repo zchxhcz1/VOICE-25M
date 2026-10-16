@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Fit V3 beta on measured references, excluding self and related donor/block objects."""
+"""Fit gene-wise fusion weights on measured reference slides."""
 from pathlib import Path
 import argparse
 import json
@@ -20,7 +20,7 @@ def main():
     import numpy as np
     import h5py
     from voice.release import Release
-    from voice.retrieval import CommunityR100,sha
+    from voice.retrieval import ReferenceBank,sha
     from voice.gate import fit_beta,_fit_eligible
     from voice.training_contract import read_ids,dataset_contract,gene_hash
     from voice.tissue import reference_exclusions,tissue_of_object
@@ -59,7 +59,7 @@ def main():
         counts=sparse.load_npz(d/'expression.npz').tocsr()[er][:,columns].astype(np.float32)
         counts.data=np.log1p(counts.data);Y=counts.toarray()
         excluded=reference_exclusions(a.dataset,sample,model['objects']);exclusions[sample]=excluded
-        bank=CommunityR100(a.bank,a.device,exclude=excluded);bank.configure(panel)
+        bank=ReferenceBank(a.bank,a.device,exclude=excluded);bank.configure(panel)
         R=np.empty_like(A)
         for start in range(0,len(H),a.batch_size):
             R[start:start+a.batch_size]=bank.retrieve(H[start:start+a.batch_size],50)[0]
@@ -75,16 +75,16 @@ def main():
         for fit in fits:
             for g,b in fit.items():acc.setdefault(g,[]).append(b)
         return {'n_refs':len(fits),'beta':{str(g):float(np.mean(v)) for g,v in acc.items()}}
-    gate={'version':'v3_comm100_K50','tissue_casefold':True,'panel_cut':1000,'min_refs':2,
+    gate={'version':'per_gene', 'fallback':'same_tissue','tissue_casefold':True,'panel_cut':1000,'min_refs':2,
           'strata_order':sorted(grouped),'strata':{k:aggregate(grouped[k]) for k in sorted(grouped)},
           'global':aggregate(all_fits),'fit_signature':{'genes':gene_hash(genes)},
           'branches':{'A':'log1p(mu)','R':'per-bank-slide z','fusion':'beta*A+(1-beta)*R'}}
     out=Path(a.out);out.parent.mkdir(parents=True,exist_ok=True);out.write_text(json.dumps(gate,indent=2)+'\n')
     meta={'gate_sha256':sha(out),'checkpoint_sha256':release.hashes['stage1'],
           'stage2_checkpoint_sha256':release.hashes['stage2'],'gene_space_sha256':release.hashes['gene_space'],
-          'cache_fingerprint':model['cache_fingerprint'],'retrieval_method':'comm100_K50',
-          'K':50,'tau':0.03,'target_size':100,'calibrated_for_comm100':True,
-          'reference_objects':refs,'reference_exclusions':exclusions,'rule':'v3',
+          'cache_fingerprint':model['cache_fingerprint'],'retrieval_method':'cluster_retrieval',
+          'K':50,'tau':0.03,'target_size':100,
+          'reference_objects':refs,'reference_exclusions':exclusions,'fallback':'same_tissue',
           'max_calibration_cells':a.max_cells,'sampling_seed':a.seed,
           'tissue_casefold':True,'min_refs':2,'panel_cut':1000}
     out.with_suffix('.meta.json').write_text(json.dumps(meta,indent=2)+'\n')

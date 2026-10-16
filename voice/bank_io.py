@@ -1,4 +1,4 @@
-"""Small I/O and provenance helpers; never import the old training stack."""
+"""Reference bank I/O and consistency checks."""
 from contextlib import contextmanager
 from pathlib import Path
 import fcntl
@@ -7,9 +7,9 @@ import json
 import os
 import numpy as np
 
-SCHEMA = 'voice25m-comm100-k50-82ref-v1'
-FEATURE_PROTOCOL = 'voice25m_phase1_cmask_pool1536_raw_v1'
-VALUE_PROTOCOL = 'stage3_log1p_per_object_population_z_sd_floor1e-3_fp16_v1'
+SCHEMA = 'voice25m-reference-bank'
+FEATURE_PROTOCOL = 'masked_cell_features'
+VALUE_PROTOCOL = 'standardized_log_expression'
 ARTIFACTS = ('keys', 'values', 'panel', 'counts', 'labels', 'PCA_mean',
              'PCA_components', 'PCA_training_rows')
 

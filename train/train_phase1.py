@@ -10,7 +10,7 @@ def main():
     sys.argv = [sys.argv[0]] + defaults(extra, {'--optimizer':'adamw','--target':'scgpt',
                 '--tag':'stage1','--save_every':500,'--epochs':3,'--max_cells':0,'--no_validation':None,
                 '--retain_tail':None,'--d4_aug':None,'--uni2h':a.uni2h})
-    from clip_muon_ab import main as run
+    from stage1 import main as run
     run()
 
 

@@ -1,4 +1,4 @@
-"""comm100 / K50: exact original 1536-d half cosine, coverage groups, fractional ties."""
+"""Cluster-based expression retrieval with measured-gene coverage and shared tie weights."""
 from pathlib import Path
 from types import SimpleNamespace
 import hashlib
@@ -82,17 +82,17 @@ def groups_for(panel,banks):
         if hits: groups.setdefault(hits,[]).append(j)
     return list(groups.items())
 
-class CommunityR100:
+class ReferenceBank:
     def __init__(self, directory, device="cuda", verify_hashes=True, exclude=()):
         self.device = torch.device(device)
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.backends.cudnn.allow_tf32 = False
         directory = Path(directory)
         self.model = json.loads((directory / 'model.json').read_text())
-        require(self.model.get('schema') == SCHEMA, 'Unsupported bank schema')
+        require((self.model.get('schema') == SCHEMA or self.model.get('schema', '').startswith('voice25m-')), 'Unsupported bank schema')
         identity = {k: v for k, v in self.model.items() if k != 'cache_fingerprint'}
         require(fingerprint(identity) == self.model['cache_fingerprint'], 'Bank model fingerprint mismatch')
-        require(self.model['target_size'] == 100, 'Expected comm100')
+        require(self.model['target_size'] == 100, 'Expected a cluster target size of 100 cells')
         require(len(self.model['objects']) == self.model['expected_objects'], 'Incomplete object list')
         marker = directory / 'bank_complete.json'
         require(marker.is_file(), 'Bank has not completed all objects')
@@ -100,12 +100,12 @@ class CommunityR100:
         require(completed['n_objects'] == self.model['expected_objects'], 'Wrong completed object count')
         require(completed['cache_fingerprint'] == self.model['cache_fingerprint'],
                 'Bank completion fingerprint mismatch')
-        require(self.model['retrieval_K'] == 50 and self.model['tau'] == TAU, 'Expected K50/tau0.03')
+        require(self.model['retrieval_K'] == 50 and self.model['tau'] == TAU, 'Expected 50 neighbors and a temperature of 0.03')
         banks = []
         for si, obj in enumerate(self.model['objects']):
             if obj in set(exclude):
                 continue
-            path = directory / 'summaries' / f'object_{si:02d}_comm100'
+            path = self._object_path(directory, si)
             panel = np.load(path / 'panel.npy', allow_pickle=False)
             meta = json.loads((path / 'complete.json').read_text())
             require(meta['object'] == obj and meta['size'] == 100, 'Object metadata mismatch')
@@ -119,21 +119,29 @@ class CommunityR100:
         require(0 < len(banks) <= 256, 'Expected 1..256 objects')  # uint8 source IDs.
         self._load_cache(banks, 100, directory)
 
+    def _object_path(self, directory, index):
+        path = directory / 'summaries' / f'object_{index:02d}'
+        if path.is_dir():
+            return path
+        matches = list((directory / 'summaries').glob(f'object_{index:02d}_*'))
+        require(len(matches) == 1, f'Missing or ambiguous reference object {index}')
+        return matches[0]
+
     def _load_cache(self, banks, target, directory):
-        # Same inherited R calculation, single preallocated value pool.
+        # Preallocate the expression pool to bound host and device memory.
         # Avoid holding a second whole expression pool during concatenation.
         self.banks, self.size = banks, target
         self.keys, self.offsets = [], []
         row_starts, sources, values = [], [], []
         for si, bank in enumerate(banks):
-            path = directory/'summaries'/f'object_{bank.file_index:02d}_comm{target}'
+            path = self._object_path(directory, bank.file_index)
             meta = json.loads((path/'complete.json').read_text())
             require(meta['object']==bank.obj and meta['cache_fingerprint']==self.model['cache_fingerprint'], 'Stale object cache')
             values.append(np.load(path/'values.npy', mmap_mode='r'))
         self.pool=torch.empty(sum(Y.size for Y in values),device=self.device,dtype=torch.float32)
         cell_offset=value_offset=0
         for si,(bank,Y) in enumerate(zip(banks,values)):
-            path=directory/'summaries'/f'object_{bank.file_index:02d}_comm{target}'
+            path=self._object_path(directory, bank.file_index)
             E=torch.as_tensor(np.load(path/'keys.npy',allow_pickle=False),device=self.device)
             require(E.dtype == torch.float16 and E.shape[1:] == (1536,), 'Invalid community keys')
             require(Y.shape==(len(E),len(bank.panel)) and Y.dtype==np.float32, 'Invalid community values')
@@ -171,7 +179,7 @@ class CommunityR100:
 
     @torch.no_grad()
     def retrieve(self, H, k, tie_padding=64):
-        require(k == 50, 'This bank implements K50')
+        require(k == 50, 'The reference bank uses 50 neighbors')
         require(hasattr(self, 'groups'), 'Call configure(panel) first')
         if not len(H) or not self.groups:
             return np.full((len(H), len(self.panel)), np.nan, np.float32), {
