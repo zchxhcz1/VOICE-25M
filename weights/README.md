@@ -1,6 +1,20 @@
 # Model artifacts
 
-Large weights and reference data are distributed separately from this source repository. This repository does **not** contain a public download URL for the 25M model/bank yet. A source checkout alone cannot produce trained-model predictions. The release owner must publish the compatible release artifacts and add their download location here.
+The released VOICE checkpoints, V3 beta, gene space and matching comm100/K50 bank are available at **[zchx/VOICE-25M](https://huggingface.co/zchx/VOICE-25M)**. Download the complete snapshot, then obtain UNI2-h separately through the official access process. The source repository contains code; its linked Hugging Face repository contains the model artifacts.
+
+Download the VOICE checkpoints, V3 beta and matching bank from [zchx/VOICE-25M](https://huggingface.co/zchx/VOICE-25M), then obtain the original UNI2-h weights from its official gated repository:
+
+```bash
+hf auth login
+python - <<'PYTHON'
+from huggingface_hub import snapshot_download, hf_hub_download
+release_dir = "/models/voice25m"
+snapshot_download(repo_id="zchx/VOICE-25M", local_dir=release_dir)
+hf_hub_download("MahmoodLab/UNI2-h", "pytorch_model.bin", local_dir=f"{release_dir}/uni2h")
+PYTHON
+```
+
+Use your own Hugging Face account with approved UNI2-h access. The original UNI2-h base weights are not redistributed in the VOICE repository. The downloaded release contains relative paths and is ready for inference once `uni2h/pytorch_model.bin` has been added.
 
 A complete release directory contains:
 

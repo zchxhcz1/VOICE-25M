@@ -9,7 +9,7 @@ python predict/predict.py --image /data/slide.svs \
   --release /models/voice25m --out /results/pred.h5ad
 ```
 
-只提供 H&E 即可开始：自动分割核、按 55 µm 视野裁剪、构造掩膜、直接预测、cluster bank 召回、V3 融合。普通 PNG/JPEG 通常缺少物理分辨率，需要另传实际 `--mpp`；程序不会猜测。原始输入不需要 RNA、已算好的特征或训练数据。预训练权重和 bank 是运行依赖，代码仓库没有它们的公开下载地址，发布者还需提供。
+只提供 H&E 即可开始：自动分割核、按 55 µm 视野裁剪、构造掩膜、直接预测、cluster bank 召回、V3 融合。普通 PNG/JPEG 通常缺少物理分辨率，需要另传实际 `--mpp`；程序不会猜测。原始输入不需要 RNA、已算好的特征或训练数据。预训练适配权重、beta 和 bank 可从 [zchx/VOICE-25M](https://huggingface.co/zchx/VOICE-25M) 下载；UNI2-h 基础权重需自行向官方申请并下载。
 
 输出 `X` 是融合分数，`layers['A']` 是直接分支 `log1p(mu)`，`layers['R']` 是召回的 z-score；融合值不能当绝对分子计数。支持已有 `--cells` 或 `--prepared` 输入；大矩阵逐批写盘。
 

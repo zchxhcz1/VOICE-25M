@@ -6,6 +6,10 @@ This release uses **comm100 / K50 / V3**: approximately 100 cells per k-means cl
 
 [中文说明](docs/README_CN.md) · [Training](docs/training.md) · [Model artifacts](weights/README.md) · [Input/output formats](docs/formats.md) · [Validation](docs/validation.md)
 
+## Resources
+
+- **Model:** [zchx/VOICE-25M](https://huggingface.co/zchx/VOICE-25M)
+
 ## Install
 
 Python 3.10 or later; Python 3.11 is the tested environment. Install a CUDA-enabled PyTorch build appropriate for your machine, then:
@@ -21,6 +25,20 @@ UNI2-h weights require access to [MahmoodLab/UNI2-h](https://huggingface.co/Mahm
 ## Predict from one H&E image
 
 Obtain a compatible model release following [weights/README.md](weights/README.md). The source repository contains code and the calibrated beta JSON; large neural weights and the reference bank are separate artifacts. No target RNA, cell coordinates, masks, precomputed features, or training corpus are required.
+
+Download the VOICE checkpoints, V3 beta and matching bank from [zchx/VOICE-25M](https://huggingface.co/zchx/VOICE-25M), then obtain the original UNI2-h weights from its official gated repository:
+
+```bash
+hf auth login
+python - <<'PYTHON'
+from huggingface_hub import snapshot_download, hf_hub_download
+release_dir = "/models/voice25m"
+snapshot_download(repo_id="zchx/VOICE-25M", local_dir=release_dir)
+hf_hub_download("MahmoodLab/UNI2-h", "pytorch_model.bin", local_dir=f"{release_dir}/uni2h")
+PYTHON
+```
+
+Use your own Hugging Face account with approved UNI2-h access. The original UNI2-h base weights are not redistributed in the VOICE repository. The downloaded release contains relative paths and is ready for inference once `uni2h/pytorch_model.bin` has been added.
 
 ```bash
 python predict/predict.py \
