@@ -1,6 +1,6 @@
 # VOICE-25M
 
-Predict single-cell gene expression from H&E images using an image encoder, a spatial decoder, and a reference bank of cells with measured expression.
+Predict spatial single-cell gene expression from H&E images using an image encoder, a spatial decoder, and a reference bank of cells with measured expression.
 
 ## Resources
 
