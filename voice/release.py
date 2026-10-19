@@ -37,8 +37,9 @@ class Release:
                       (self.gate_meta['gate_sha256'], sha(self.paths['gate']))]
             if any(a != b for a, b in checks):
                 raise ValueError('Model checkpoints, genes, reference bank and fusion weights do not match')
-            from predict.spatial_context import check_prediction_protocol
-            check_prediction_protocol(self.gate_meta.get('spatial_context', {}))
+            if 'spatial_context' in self.gate_meta:
+                from predict.spatial_context import check_prediction_protocol
+                check_prediction_protocol(self.gate_meta['spatial_context'])
             if (self.gate_meta.get('K') != self.bank['retrieval_K'] or
                     self.gate_meta.get('tau') != self.bank['tau']):
                 raise ValueError('Fusion weights and reference bank retrieval settings differ')

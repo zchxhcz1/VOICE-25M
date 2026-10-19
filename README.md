@@ -49,7 +49,7 @@ python predict/predict.py \
   --out results/prediction.h5ad
 ```
 
-The command segments nuclei, extracts cell-centered image crops, predicts expression, retrieves reference expression, and combines both predictions. It also saves the segmentation beside the output. The model download includes the calibrated fusion weights and reference bank used by this command. The first segmentation run downloads the Cellpose model; use `--segment-model` to provide local segmentation weights.
+The command segments nuclei, extracts cell-centered image crops, predicts expression, retrieves reference expression, and combines both predictions. It also saves the segmentation beside the output. The model download includes the fusion weights and reference bank used by this command. The first segmentation run downloads the Cellpose model; use `--segment-model` to provide local segmentation weights.
 
 Spatial prediction uses up to 128 target cells and 64 neighboring context cells per block, with context selected within 137 µm. All cells in the block participate in attention; only target predictions are saved. Every cell is output once. Partitioning is deterministic for a given sample ID and fixed seed.
 
