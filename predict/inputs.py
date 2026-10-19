@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import numpy as np
 
-from predict.geometry import polygon_mask, crop_px_for, OUTPUT_SIZE, TOKEN_GRID, MPP_REF
+from predict.geometry import polygon_mask, crop_px_for, OUTPUT_SIZE, TOKEN_GRID
 
 
 class WSISlide:
@@ -35,7 +35,7 @@ class WSISlide:
     def __len__(self): return len(self.pos)
 
     def describe(self):
-        fov = self.crop_px * (self.mpp or MPP_REF)
+        fov = self.crop_px * self.mpp
         return (f"{os.path.basename(self.image)} {self.width}x{self.height} via {self.backend} | "
                 f"mpp={self.mpp if self.mpp else 'unknown'} -> crop {self.crop_px:.1f} px = {fov:.1f} um | "
                 f"polygons: {'yes' if self.poly else 'NO (centre-token mask)'}")
@@ -111,22 +111,6 @@ class PreparedSlide:
             sx = OUTPUT_SIZE / self.output_size
             W[j] = polygon_mask(self.vx[a:b] * sx, self.vy[a:b] * sx)
         return imgs, W
-
-    def expression(self, head):
-        """(Y_log1p [N, G], global gene ids [G]) over genes present in `head` (symbol -> global id); (None, None)
-        if the slide carries no expression. Only used to SCORE a prediction."""
-        e = os.path.join(self.dir, "expression.npz"); g = os.path.join(self.dir, "genes.tsv")
-        if not (os.path.exists(e) and os.path.exists(g)):
-            return None, None
-        import pandas as pd
-        from scipy import sparse
-        syms = pd.read_csv(g, sep="\t").iloc[:, 0].astype(str).tolist()
-        cols, hidx, seen = [], [], set()
-        for k, sym in enumerate(syms):
-            if sym in head and sym not in seen:
-                seen.add(sym); cols.append(k); hidx.append(head[sym])
-        X = sparse.load_npz(e).tocsr()[self.er][:, np.asarray(cols, np.int64)]
-        return np.log1p(np.asarray(X.todense(), np.float32)), np.asarray(hidx, np.int64)
 
 
 def open_slide(image=None, cells=None, prepared=None, mpp=None):

@@ -1,74 +1,21 @@
-"""Spatial attention based on pairwise cell distances."""
-from __future__ import annotations
-import math
-import torch, torch.nn as nn
-import os, sys
-
-from voice._se2_arch import SE2Layer, SE2Transformer, GaussianModule
+"""Six spatial attention layers using pairwise distances in microns."""
+import torch
+from torch import nn
+from voice._se2_arch import SE2Layer, GaussianModule
 
 
-class LoopedSE2Layer(SE2Layer):
-    def forward(self, feat, Z, res_scale: float = 1.0):
-        N = feat.shape[0]
-        feat_n = self.norm1(feat)
-        pair_update = self.pair_update(feat_n.unsqueeze(1) + feat_n.unsqueeze(0))
-        Z = Z + res_scale * self.pair_mlp(torch.cat([self.norm_pair(Z), pair_update], dim=-1))
-
-        attn_bias = self.pair_to_bias(Z).permute(2, 0, 1)
-        Q = self.q_proj(feat_n).view(N, self.n_heads, self.d_head).permute(1, 0, 2)
-        K = self.k_proj(feat_n).view(N, self.n_heads, self.d_head).permute(1, 0, 2)
-        V = self.v_proj(feat_n).view(N, self.n_heads, self.d_head).permute(1, 0, 2)
-        scores = torch.bmm(Q, K.transpose(1, 2)) / math.sqrt(self.d_head) + attn_bias
-        out = torch.bmm(torch.softmax(scores, dim=-1), V).permute(1, 0, 2).reshape(N, -1)
-        feat = feat + res_scale * self.out_proj(out)
-        feat = feat + res_scale * self.ffn(self.norm2(feat))
-        return feat, Z
-
-
-class LoopedSE2Transformer(nn.Module):
-    """Spatial transformer with optional shared-weight attention layers."""
-
-    def __init__(self, d_model=256, d_pair=64, n_heads=8, n_layers=4, span=0.0, r=1,
-                 n_gaussians=128, max_dist=137.0):
+class SpatialTransformer(nn.Module):
+    def __init__(self):
         super().__init__()
-        assert 0.0 <= span <= 1.0 and r >= 1
-        self.gaussian = GaussianModule(d_pair, n_gaussians, max_dist)
-        n_mid = int(round(n_layers * span)) if r > 1 else 0
-        n_pre = (n_layers - n_mid) // 2
-        n_post = n_layers - n_mid - n_pre
-        mk = lambda n: nn.ModuleList([LoopedSE2Layer(d_model, d_pair, n_heads) for _ in range(n)])
-        self.pre, self.mid, self.post = mk(n_pre), mk(n_mid), mk(n_post)
-        self.norm_out = nn.LayerNorm(d_model)
-        self.r = r if n_mid else 1
-        self.n_pre, self.n_mid, self.n_post = n_pre, n_mid, n_post
-        self.max_dist = max_dist
-
-    @property
-    def effective_depth(self):
-        return self.n_pre + self.n_mid * self.r + self.n_post
-
-    def describe(self):
-        return (f"{self.n_pre}+{self.n_mid}+{self.n_post} layers (pre+mid+coda), r={self.r}, "
-                f"depth {self.effective_depth}, {sum(p.numel() for p in self.parameters()):,} params, "
-                f"max_dist {self.max_dist:.0f}um")
+        self.gaussian = GaussianModule(64, 128, 137.0)
+        self.pre = nn.ModuleList([SE2Layer(256, 64, 8) for _ in range(3)])
+        self.post = nn.ModuleList([SE2Layer(256, 64, 8) for _ in range(3)])
+        self.norm_out = nn.LayerNorm(256)
 
     def forward(self, x, pos):
-        """x [N, d_model]; pos [N, 2] in MICRONS.
-
-        VOICE's scale_dataset builds pos from x_pixel/y_pixel, which are SOURCE H&E pixels, and
-        um_per_pixel_source spans 0.1369-0.4812 across this corpus -- a 3.52x ratio. A fixed max_dist in
-        pixels therefore covers 68um on the finest slide and 241um on the coarsest, so the Gaussian basis
-        would describe a different physical neighbourhood per slide. Microns make it comparable.
-        """
-        D = (pos.unsqueeze(0) - pos.unsqueeze(1)).norm(dim=-1)
-        Z = self.gaussian(D)
-        feat = x
+        Z = self.gaussian((pos.unsqueeze(0) - pos.unsqueeze(1)).norm(dim=-1))
         for layer in self.pre:
-            feat, Z = layer(feat, Z)
-        rs = 1.0 / self.r
-        for _ in range(self.r):
-            for layer in self.mid:
-                feat, Z = layer(feat, Z, res_scale=rs)
+            x, Z = layer(x, Z)
         for layer in self.post:
-            feat, Z = layer(feat, Z)
-        return self.norm_out(feat)
+            x, Z = layer(x, Z)
+        return self.norm_out(x)

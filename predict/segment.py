@@ -46,6 +46,11 @@ def _require(mod, pip):
 
 
 def load_model(gpu: bool = True, weights=None):
+    if weights is not None:
+        weights = pathlib.Path(weights).expanduser().resolve()
+        if not weights.is_file():
+            raise FileNotFoundError(f'Segmentation weights not found: {weights}')
+        weights = str(weights)
     _require("cellpose", "cellpose>=4.0")
     from cellpose import models
     from huggingface_hub import hf_hub_download
@@ -107,7 +112,6 @@ def main():
     ap.add_argument("--flow_threshold", type=float, default=0.4)
     ap.add_argument("--cellprob_threshold", type=float, default=0.0)
     ap.add_argument("--cpu", action="store_true")
-    ap.add_argument("--limit", type=int, default=0, help="stop after N windows (smoke test)")
     a = ap.parse_args()
 
     rd = SlideReader(a.image)
@@ -119,9 +123,6 @@ def main():
     scale = mpp / MPP_REF          # >1 => coarser than reference => upsample the window
     print(f"[slide] {a.image} {rd.width}x{rd.height} via {rd.backend} | "
           f"mpp={mpp if mpp else 'unknown'} -> window scale {scale:.3f}", flush=True)
-    if mpp is None:
-        print("[warn]  no resolution found; assuming the reference resolution. Pass --mpp if that is wrong -- "
-              "nuclei at the wrong apparent size are the usual cause of poor segmentation.", flush=True)
     if a.overlap < 64:
         print(f"[warn]  --overlap {a.overlap} px is small; nuclei on window seams may be cut.", flush=True)
 
@@ -129,42 +130,42 @@ def main():
     W, ov = a.window, a.overlap
     xs = list(range(0, rd.width, W)); ys = list(range(0, rd.height, W))
     total = len(xs) * len(ys)
-    print(f"[plan]  {len(xs)}x{len(ys)} = {total} windows of {W} px (+{ov} px context)", flush=True)
+    print(f"[plan]  {len(xs)}x{len(ys)} = {total} windows up to {W} px (+{ov} px context)", flush=True)
 
     cy_all, cx_all, area_all, polys = [], [], [], []
     t0 = time.time(); done = 0
     for y0 in ys:
         for x0 in xs:
             done += 1
-            if a.limit and done > a.limit:
-                break
-            side = W + 2 * ov
-            rgb = rd.region(x0 - ov, y0 - ov, side)
-            if rgb.max() == 0:                                  # fully outside the image
+            tile_width = min(W, rd.width-x0)
+            tile_height = min(W, rd.height-y0)
+            width, height = tile_width+2*ov, tile_height+2*ov
+            rgb = rd.region(x0-ov, y0-ov, max(width,height))[:height,:width]
+            if rgb.max() == 0:
                 continue
-            if abs(scale - 1.0) > 1e-3:
+            if abs(scale-1.0) > 1e-3:
                 from PIL import Image
-                s = max(32, int(round(side * scale)))
-                rgb_s = np.asarray(Image.fromarray(rgb).resize((s, s), Image.BILINEAR))
+                scaled_width = max(32, int(round(width*scale)))
+                scaled_height = max(32, int(round(height*scale)))
+                rgb_s = np.asarray(Image.fromarray(rgb).resize((scaled_width,scaled_height), Image.BILINEAR))
             else:
-                rgb_s, s = rgb, side
+                rgb_s = rgb
+                scaled_width, scaled_height = width, height
             lab = segment_window(model, rgb_s, a.channel, a.niter, a.flow_threshold, a.cellprob_threshold)
-            inv = side / float(s)                               # window-scaled px -> slide px
+            inv_x, inv_y = width/float(scaled_width), height/float(scaled_height)
             for cx, cy, area, c in polygons_from_labels(lab, MIN_AREA_PX):
-                gx = (x0 - ov) + cx * inv
-                gy = (y0 - ov) + cy * inv
+                gx = (x0 - ov) + cx * inv_x
+                gy = (y0 - ov) + cy * inv_y
                 # keep only centroids in this window's OWN interior -> every nucleus assigned exactly once
-                if not (x0 <= gx < x0 + W and y0 <= gy < y0 + W):
+                if not (x0 <= gx < x0 + tile_width and y0 <= gy < y0 + tile_height):
                     continue
                 if not (0 <= gx < rd.width and 0 <= gy < rd.height):
                     continue
-                cx_all.append(gx); cy_all.append(gy); area_all.append(area * inv * inv)
-                cc = c.copy(); cc[:, 0] = (x0 - ov) + cc[:, 0] * inv; cc[:, 1] = (y0 - ov) + cc[:, 1] * inv
+                cx_all.append(gx); cy_all.append(gy); area_all.append(area * inv_x * inv_y)
+                cc = c.copy(); cc[:, 0] = (x0 - ov) + cc[:, 0] * inv_x; cc[:, 1] = (y0 - ov) + cc[:, 1] * inv_y
                 polys.append(cc)
             if done % 20 == 0 or done == total:
                 print(f"    window {done}/{total}  {len(cx_all):,} nuclei  ({time.time()-t0:.0f}s)", flush=True)
-        if a.limit and done > a.limit:
-            break
     rd.close()
 
     n = len(cx_all)

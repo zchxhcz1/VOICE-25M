@@ -1,6 +1,7 @@
 """Prepare row-aligned scGPT cell embeddings from measured expression."""
 from __future__ import annotations
-import os, sys, json, time, glob, types, zlib, logging, argparse
+import os, sys, json, time, zlib, argparse
+from pathlib import Path
 from contextlib import nullcontext
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, str(__import__("pathlib").Path(HERE).parent))
@@ -9,24 +10,19 @@ import numpy as np, pandas as pd, scipy.sparse as sp, torch
 from voice.scgpt_backend.model import TransformerModel        # noqa: E402
 from voice.scgpt_backend.data_collator import DataCollator          # noqa: E402
 
-DATASET = os.environ.get("VOICE_DATASET", "data")
-SCGPT_DIR = os.environ.get("VOICE_SCGPT_DIR", os.path.join(os.path.dirname(HERE), "weights", "scgpt_human"))
-OUT = os.environ.get("VOICE_SCGPT_EMB", "")
 log = lambda *x: print(*x, flush=True)
 
 
-def load_model(dev):
-    cfg = json.load(open(f"{SCGPT_DIR}/args.json"))
-    vocab = json.load(open(f"{SCGPT_DIR}/vocab.json"))
+def load_model(directory, dev):
+    directory = Path(directory)
+    cfg = json.load(open(directory/'args.json'))
+    vocab = json.load(open(directory/'vocab.json'))
     for s in ("<pad>", "<cls>", "<eoc>"):
         assert s in vocab, s
-    model = TransformerModel(ntoken=len(vocab), d_model=cfg["embsize"], nhead=cfg["nheads"], d_hid=cfg["d_hid"],
-                             nlayers=cfg["nlayers"], nlayers_cls=cfg["n_layers_cls"], n_cls=1, vocab=vocab,
-                             dropout=cfg["dropout"], pad_token=cfg["pad_token"], pad_value=cfg["pad_value"],
-                             do_mvc=True, do_dab=False, use_batch_labels=False, domain_spec_batchnorm=False,
-                             explicit_zero_prob=False, use_fast_transformer=False,
-                             fast_transformer_backend="flash", pre_norm=False)
-    sd = torch.load(f"{SCGPT_DIR}/best_model.pt", map_location="cpu", weights_only=False)
+    model = TransformerModel(ntoken=len(vocab), d_model=cfg['embsize'], nhead=cfg['nheads'],
+                             d_hid=cfg['d_hid'], nlayers=cfg['nlayers'], vocab=vocab,
+                             dropout=cfg['dropout'], pad_token=cfg['pad_token'])
+    sd = torch.load(directory/'best_model.pt', map_location="cpu", weights_only=False)
     sd = {k.replace("Wqkv.", "in_proj_"): v for k, v in sd.items()}
     own = model.state_dict()
     used = {k: v for k, v in sd.items() if k in own and v.shape == own[k].shape}
@@ -34,7 +30,7 @@ def load_model(dev):
     enc_keys = [k for k in own if k.startswith(("encoder.", "value_encoder.", "transformer_encoder."))]
     missing = [k for k in enc_keys if k not in used]
     assert not missing, f"encoder weights not loaded: {missing[:5]}"
-    log(f"[scgpt] {SCGPT_DIR}: {len(used)}/{len(sd)} tensors; every encoder tensor present ({len(enc_keys)})")
+    log(f"[scgpt] {directory}: {len(used)}/{len(sd)} tensors; every encoder tensor present ({len(enc_keys)})")
     return model.to(dev).eval(), vocab, cfg
 
 
@@ -65,8 +61,7 @@ def embed_object(o, d, model, vocab, cfg, dev, max_tokens=98304, workers=8):
     np.random.seed(zlib.crc32(o.encode()))          # stable per object (Python's str hash is salted per process)
     torch.manual_seed(0)
     ds = CellDS(Xk, vid[keep], vocab["<cls>"], cfg["pad_value"])
-    col = DataCollator(do_padding=True, pad_token_id=vocab[cfg["pad_token"]], pad_value=cfg["pad_value"],
-                       do_mlm=False, do_binning=True, max_length=1200, sampling=True, keep_first_n_tokens=1)
+    col = DataCollator(pad_token_id=vocab[cfg['pad_token']], pad_value=cfg['pad_value'])
     order = np.argsort(nnz, kind="stable"); order = order[nnz[order] > 0]
     batches, cur, cur_len = [], [], 0
     for i in order:                                   # token-budget batches over length-sorted cells
@@ -105,32 +100,29 @@ def main():
     ap.add_argument("--max_tokens", type=int, default=98304)
     ap.add_argument("--workers", type=int, default=8)
     a = ap.parse_args()
-    global DATASET, SCGPT_DIR, OUT
-    DATASET, SCGPT_DIR, OUT = a.dataset, a.scgpt_dir, a.out
-    assert OUT, "set VOICE_SCGPT_EMB to the output directory"
-    os.makedirs(OUT, exist_ok=True)
+    dataset = Path(a.dataset).expanduser().resolve()
+    a.out = str(Path(a.out).expanduser().resolve())
+    Path(a.out).mkdir(parents=True, exist_ok=True)
     jobs = []
-    for split in ("training_set",):
-        for plat in ("xenium", "cosmx"):
-            for d in sorted(glob.glob(f"{DATASET}/{split}/{plat}/*/*/")):
-                d = d.rstrip("/")
-                if os.path.exists(f"{d}/expression.npz"):
-                    jobs.append((os.path.basename(d), d))
+    for platform in ['xenium', 'cosmx']:
+        for directory in sorted((dataset/'training_set'/platform).glob('*/*')):
+            if (directory/'expression.npz').is_file():
+                jobs.append((directory.name, str(directory)))
     if a.only:
         want = [x for x in a.only.split(",") if x]
         jobs = [j for j in jobs if j[0] in want]
         assert {j[0] for j in jobs} == set(want), f"unknown objects: {sorted(set(want) - {j[0] for j in jobs})}"
     jobs = jobs[a.shard::a.nshard]
-    log(f"[plan] shard {a.shard}/{a.nshard}: {len(jobs)} objects -> {OUT}")
+    log(f"[plan] shard {a.shard}/{a.nshard}: {len(jobs)} objects -> {a.out}")
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, vocab, cfg = load_model(dev)
+    model, vocab, cfg = load_model(a.scgpt_dir, dev)
     for o, d in jobs:
-        p = f"{OUT}/{o}.npy"
+        p = f"{a.out}/{o}.npy"
         if os.path.exists(p):
             log(f"  [{o}] cached"); continue
         out, m = embed_object(o, d, model, vocab, cfg, dev, a.max_tokens, a.workers)
         tmp = p + ".tmp.npy"; np.save(tmp, out); os.replace(tmp, p)
-        json.dump(m, open(f"{OUT}/{o}.json", "w"), indent=2)
+        json.dump(m, open(f"{a.out}/{o}.json", "w"), indent=2)
     log("[done]")
 
 

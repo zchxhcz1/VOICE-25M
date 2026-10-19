@@ -3,7 +3,7 @@ import math
 import torch
 from torch import nn
 class GaussianModule(nn.Module):
-    def __init__(self, d_pair: int, n_gaussians: int = 128, max_dist: float = 500.0):
+    def __init__(self, d_pair: int, n_gaussians: int = 128, max_dist: float = 137.0):
         super().__init__()
         self.max_dist = max_dist
         self.means = nn.Parameter(torch.linspace(0.0, 1.0, n_gaussians))
@@ -55,22 +55,3 @@ class SE2Layer(nn.Module):
         feat = feat + self.out_proj(out)
         feat = feat + self.ffn(self.norm2(feat))
         return feat, Z
-
-class SE2Transformer(nn.Module):
-    def __init__(self, d_model, d_pair, n_heads, n_layers, n_gaussians=128, max_dist=500.0):
-        super().__init__()
-        self.gaussian = GaussianModule(d_pair, n_gaussians, max_dist)
-        self.layers = nn.ModuleList(
-            [SE2Layer(d_model, d_pair, n_heads) for _ in range(n_layers)]
-        )
-        self.norm_out = nn.LayerNorm(d_model)
-
-    def forward(self, x, pos):
-        # x: [N, d_model], pos: [N, 2] (y, x in pixels)
-        diff = pos.unsqueeze(0) - pos.unsqueeze(1)
-        D = diff.norm(dim=-1)
-        Z = self.gaussian(D)
-        feat = x
-        for layer in self.layers:
-            feat, Z = layer(feat, Z)
-        return self.norm_out(feat)

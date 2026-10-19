@@ -53,6 +53,6 @@ The training settings and retrieval parameters are described in [training.md](tr
 
 ## Prediction output
 
-Output is an AnnData `.h5ad` file. Predictions and reference scores are float32; optional stored embeddings are float16. `obsm['spatial']` uses x,y source-image pixels. `obs` also contains pixel and micron coordinates. Each cell is predicted once.
+Output is an AnnData `.h5ad` file. Predictions and reference scores are float32; optional stored embeddings are float16. `obsm['spatial']` uses x,y source-image pixels. `obs` also contains pixel and micron coordinates. Every cell is written once as a target. Spatial blocks contain at most 128 targets and 64 additional context cells selected within 137 µm; context predictions are not written.
 
 The final file is written after all predictions complete. An interrupted run can leave a `.partial` file; choose a new output or use `--overwrite` to restart.

@@ -3,13 +3,7 @@ from itertools import islice
 from torch.utils.data import Dataset, DistributedSampler
 
 
-class TailSampler(DistributedSampler):
-    def __iter__(self):
-        for slot,index in enumerate(super().__iter__()):
-            yield index,slot*self.num_replicas+self.rank<len(self.dataset)
-
-
-class ResumeTailSampler(TailSampler):
+class ResumeTailSampler(DistributedSampler):
     """Skip sampler slots before DataLoader can decode the corresponding images."""
     start_slot = 0
 
@@ -33,6 +27,5 @@ class TailDataset(Dataset):
     def __init__(self,base):self.base=base
     def __len__(self):return len(self.base)
     def __getitem__(self,index):
-        if isinstance(index,tuple):index,valid=index
-        else:valid=True
+        index,valid=index
         return (*self.base[index],valid)

@@ -23,9 +23,6 @@ def tissue_of_object(dataset, sample, fold_case=True):
     return tissue_key(group) if fold_case else group
 
 
-# Only biological identity counts. Objects that share a physical glass but not a donor or block share
-# staining, scanning and the assay run, which the test side has too (TID1_scene0/1 sit on the glass of
-# training TID1_scene2-4), so removing glass-mates would make fitting harder than testing.
 EXCLUSION_FIELDS = ('donor_or_block_id',)
 
 

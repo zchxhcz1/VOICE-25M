@@ -3,7 +3,6 @@
 from pathlib import Path
 import argparse
 import json
-import subprocess
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 
@@ -28,7 +27,7 @@ def main():
     genes=np.load(release.paths['gene_space'],allow_pickle=False)['genes'].astype(str)
     lookup={g:i for i,g in enumerate(genes)}
     refs=read_ids(a.references);contract=dataset_contract(a.dataset)
-    if contract and not set(refs)<=set(contract['training_set']):raise ValueError('Bank references must be training samples')
+    if not set(refs)<=set(contract['training_set']):raise ValueError('Bank references must be training samples')
     objects=[]
     for sample in refs:
         d=object_directory(a.dataset,sample);work=out/sample;work.mkdir(exist_ok=True)
@@ -40,10 +39,14 @@ def main():
         (work/'genes.txt').write_text('\n'.join(names)+'\n')
         prediction=work/'direct.h5ad'
         if not prediction.exists():
-            subprocess.run([sys.executable,str(Path(__file__).resolve().parent.parent/'predict/predict.py'),
-                            '--prepared',str(d),'--release',str(release.root),'--out',str(prediction),
-                            '--genes',str(work/'genes.txt'),'--direct-only','--save-embeddings','--device',a.device],check=True)
+            from predict.predict import main as predict_reference
+            predict_reference(['--prepared', str(d), '--release', str(release.root), '--out', str(prediction),
+                               '--genes', str(work/'genes.txt'), '--save-embeddings', '--device', a.device],
+                              reference=True)
         with h5py.File(prediction,'r') as h:
+            from anndata.io import read_elem
+            from predict.spatial_context import check_prediction_protocol
+            check_prediction_protocol(read_elem(h['uns/voice25m'])['spatial_context'])
             if not h.attrs.get('complete') or h['uns/voice25m/stage1_sha256'].asstr()[()]!=release.hashes['stage1']:
                 raise ValueError('Cached reference predictions do not match this release')
             er=h['obs/cell_id'].asstr()[:].astype(np.int64)

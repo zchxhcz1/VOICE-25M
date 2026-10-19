@@ -40,7 +40,7 @@ See [model files](weights/README.md) for the directory structure.
 
 ## Prediction
 
-Run prediction from a single H&E image:
+Choose your own model, image and output locations in the commands below. Run prediction from a single H&E image:
 
 ```bash
 python predict/predict.py \
@@ -49,7 +49,9 @@ python predict/predict.py \
   --out results/prediction.h5ad
 ```
 
-The command segments nuclei, extracts cell-centered image crops, predicts expression, retrieves reference expression, and combines both predictions. It also saves the segmentation beside the output. The first segmentation run downloads the Cellpose model; use `--segment-model` to provide local segmentation weights.
+The command segments nuclei, extracts cell-centered image crops, predicts expression, retrieves reference expression, and combines both predictions. It also saves the segmentation beside the output. The model download includes the calibrated fusion weights and reference bank used by this command. The first segmentation run downloads the Cellpose model; use `--segment-model` to provide local segmentation weights.
+
+Spatial prediction uses up to 128 target cells and 64 neighboring context cells per block, with context selected within 137 µm. All cells in the block participate in attention; only target predictions are saved. Every cell is output once. Partitioning is deterministic for a given sample ID and fixed seed.
 
 If the image does not contain physical resolution metadata, supply its actual microns per pixel:
 
@@ -67,8 +69,8 @@ python predict/predict.py --image /path/to/image.png --mpp 0.25 \
 | `--tissue xenium_lung` | Select tissue-specific fusion weights; omitted or unknown tissue uses global weights |
 | `--genes all` | Predict all 18,580 model genes; this is the default |
 | `--genes genes.txt` | Predict an ordered list of gene symbols, one per line |
-| `--direct-only` | Predict with the image model without reference retrieval |
 | `--save-embeddings` | Save image and spatial features |
+| `--workers 4` | Set CPU workers for loading cell crops |
 | `--enc-chunk 32 --query-batch 64` | Reduce transient GPU memory use |
 | `--sample-id SAMPLE --exclude RELATED_SAMPLE` | Exclude the target and related references when they occur in the bank |
 
@@ -90,7 +92,7 @@ prediction = ad.read_h5ad("results/prediction.h5ad")
 | `var['covered']` | Reference coverage for each gene |
 | `obsm['spatial']` | Cell centroids as x,y coordinates in source-image pixels |
 
-The combined score is `beta * A + (1 - beta) * R`. Genes without reference coverage or fitted weights use the direct prediction. Combined scores describe variation across cells within each gene; they are not molecule counts. In direct-only mode, `X` contains the direct prediction.
+The combined score is `beta * A + (1 - beta) * R`. Genes without reference coverage or fitted weights use the direct prediction. Combined scores describe variation across cells within each gene; they are not molecule counts.
 
 ## Training
 

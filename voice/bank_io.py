@@ -31,11 +31,6 @@ def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
-def scalar(path, key):
-    with np.load(path, allow_pickle=False) as z:
-        return z[key].item()
-
-
 def close_array(array):
     # h5py datasets own a file handle; numpy memmaps own a read-only mapping.
     if hasattr(array, 'file'):
@@ -60,14 +55,11 @@ def exclusive(path):
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def validate_feature(meta_path, model, array=None):
+def validate_feature(meta_path, model):
     meta = json.loads(Path(meta_path).read_text())
     for key in ('checkpoint_sha256', 'feature_protocol_id'):
         require(meta[key] == model[key], f'{meta_path}: {key} mismatch')
     require(meta['dim'] == 1536, f'{meta_path}: expected 1536-dimensional Phase-1')
-    require(meta['output_field'] in ('feats', 'phase1', 'obsm/X_voice_phase1'),
+    require(meta['output_field'] == 'phase1',
             f'{meta_path}: expected raw Phase-1, not Stage-2 E or Z')
-    if array is not None and 'feature_signature' in meta:
-        from voice.retrieval import signature
-        require(signature(array) == meta['feature_signature'], f'{meta_path}: input changed')
     return meta

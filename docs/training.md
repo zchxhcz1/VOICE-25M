@@ -6,7 +6,9 @@ Training consists of preparing RNA embeddings, aligning image and RNA features, 
 pip install -r requirements-train.txt
 ```
 
-Use CUDA for model training. Commands below support one GPU with `python` or multiple GPUs with `torchrun`.
+Use CUDA for model training. Commands below support one GPU with `python` or multiple GPUs with `torchrun`. Both stages use the fixed three-epoch VOICE-25M recipe. Runtime options control paths, workers, checkpoint frequency, encoder chunk size and continuation.
+
+All paths below are examples; use your own data, model and output directories.
 
 ## Prepare the corpus
 
@@ -71,7 +73,7 @@ torchrun --standalone --nproc_per_node=3 train/train_phase1.py \
 | Augmentation | Random rotations and reflections |
 | Batch | 2,048 cells per rank, encoder chunks of 256 |
 
-Output: `/runs/voice/checkpoints/alignment/stage1_final.pt`. Adjust `--chunk` and `--eff_batch` for your hardware. `--resume` restores weights, optimizer state, and data position; use the same world size and corpus when resuming.
+Output: `/runs/voice/checkpoints/alignment/stage1_final.pt`. Adjust `--chunk` for your hardware; it must divide the fixed effective batch size of 2,048 cells per rank. `--resume` restores weights, optimizer state, and data position; use the same world size and corpus when resuming.
 
 ## Train expression prediction
 
@@ -92,11 +94,11 @@ torchrun --standalone --nproc_per_node=3 train/train_phase2.py \
 | Encoder updates | First 3 adapted blocks frozen; remaining adapters trainable |
 | Augmentation | Disabled during expression training |
 
-Output: `/runs/voice/checkpoints/expression/stage2_last.pt`. Context cells affect image context but do not contribute expression loss. Each slide supervises only its measured genes. Gradient checkpointing is enabled; `--resume` restores training state.
+Output: `/runs/voice/checkpoints/expression/stage2_last.pt`. Each epoch rotates and shifts the spatial partition, rebuilds target blocks, and shuffles their order. Every usable target cell contributes loss exactly once per epoch. Context cells participate in spatial attention but do not contribute expression loss. Each slide supervises only its measured genes. Gradient checkpointing is enabled; `--resume` restores the complete training state. Prediction reuses the same target partition and neighbor-selection functions with a fixed seed and partition epoch.
 
 ## Build the reference bank
 
-Package the direct model, encode reference slides, and construct the bank:
+Package the intermediate model, encode the image-alignment training slides, and construct the bank:
 
 ```bash
 python train/export_release.py --uni2h /models/uni2h \
@@ -106,7 +108,7 @@ python train/export_release.py --uni2h /models/uni2h \
   --xenium-space /runs/voice/direct/gene_space_xen.npz \
   --out /models/voice25m_direct
 python train/prepare_bank.py --release /models/voice25m_direct \
-  --dataset /data/corpus --references /data/corpus/splits/retrieval_references.txt \
+  --dataset /data/corpus --references /data/corpus/splits/training_set.txt \
   --out /runs/reference_inputs
 python predict/build_bank.py --manifest /runs/reference_inputs/manifest.json \
   --output /runs/bank --device cuda --backend torch

@@ -13,13 +13,13 @@ import torch.distributed as dist
 from voice.training_contract import check_checkpoint, load_lora_checked
 
 STAGE1_REVISION = 'stage1_cursor_v1'
-STAGE1_RECIPE = ['optimizer', 'target', 'platforms', 'loss', 'adjust_on', 'epochs',
-    'max_cells', 'eff_batch', 'chunk', 'lr_lora', 'lr_tower', 'wd', 'warmup', 'nblocks',
-    'r', 'alpha', 'dropout', 'seed', 'd4_aug', 'd4_cycle', 'retain_tail', 'no_validation', 'uni2h']
+STAGE1_RECIPE = ['optimizer', 'target', 'loss', 'epochs', 'max_cells', 'eff_batch', 'chunk',
+    'lr_lora', 'lr_tower', 'wd', 'warmup', 'nblocks', 'r', 'alpha', 'dropout',
+    'seed', 'd4_aug', 'retain_tail', 'no_validation']
 STAGE2_RECIPE = ['gene_emb', 'free_head', 'free_init', 'n_layers', 'd_model', 'span', 'loop_r',
-    'nblocks', 'lora_r', 'lora_alpha', 'lora_dropout', 'freeze_frac', 'frozen_enc',
-    'lr_lora', 'lr_se2', 'd4', 'n_nb', 'epochs', 'seed', 'no_validation', 'sampling',
-    'target_cells', 'context_cells', 'grad_ckpt', 'max_cells', 'max_dist', 'lam_aux', 'lam_mse']
+    'nblocks', 'lora_r', 'lora_alpha', 'lora_dropout', 'freeze_frac', 'lr_lora', 'lr_se2',
+    'd4', 'epochs', 'seed', 'no_validation', 'sampling', 'target_cells', 'context_cells',
+    'grad_ckpt', 'max_cells', 'max_dist', 'lam_aux', 'lam_mse']
 
 
 @dataclass(frozen=True)
@@ -99,16 +99,18 @@ def stage1_data_identity(slides, paths, cache):
 def check_recipe(ck, args, keys):
     current = vars(args) if not isinstance(args, dict) else args
     for key in keys:
-        if ck['args'].get(key) != current.get(key):
+        if ck['args'][key] != current[key]:
             raise ValueError(f'Resume training recipe differs: {key}')
 
 
 def check_stage1_resume(ck, args, contract, world, cells, data_identity, init_hash):
     if not args.retain_tail or not args.no_validation or not args.epochs:
         raise ValueError('Stage-1 resume requires retained tails, fixed epochs and no validation')
+    for key in ['data_identity','coverage_cursor','rng_per_rank','loader_generator_state']:
+        if key not in ck: raise ValueError(f'Incomplete training checkpoint: {key}')
     check_checkpoint(ck, contract)
     check_recipe(ck, args, STAGE1_RECIPE)
-    if ck.get('world_size') != world:
+    if ck['world_size'] != world:
         raise ValueError('Stage-1 resume requires the original DDP world size')
     if any(k not in ck for k in ['lora', 'he_tower', 'scf_tower', 'opt', 'step', 'init_hash']):
         raise ValueError('Incomplete Stage-1 weights/optimizer checkpoint')
@@ -116,39 +118,37 @@ def check_stage1_resume(ck, args, contract, world, cells, data_identity, init_ha
         raise ValueError('Stage-1 initialization differs from the saved run')
     if data_identity['cells'] != cells:
         raise ValueError('Stage-1 data identity has an inconsistent effective cell count')
-    if ck.get('data_identity', data_identity) != data_identity:
+    if ck['data_identity'] != data_identity:
         raise ValueError('Stage-1 data order/cache identity changed')
     cursor = Stage1Cursor(cells, world, args.chunk, max(1,args.eff_batch//args.chunk), args.epochs, int(ck['step']))
     if ck['args']['steps'] != cursor.total_steps or args.steps != cursor.total_steps:
         raise ValueError('Stage-1 effective cell count or total epoch budget changed')
-    if 'coverage_cursor' in ck and ck['coverage_cursor'] != cursor.record():
+    if ck['coverage_cursor'] != cursor.record():
         raise ValueError('Saved Stage-1 coverage cursor is inconsistent')
     return cursor
 
 
-def restore_stage1_weights(ck, enc, he_tower, target_tower, optimizer, lossfn):
+def restore_stage1_weights(ck, enc, he_tower, target_tower, optimizer):
     load_lora_checked(enc, ck['lora'], complete=True)
     he_tower.load_state_dict(ck['he_tower'], strict=True)
     target_tower.load_state_dict(ck['scf_tower'], strict=True)
-    if 'lossfn' in ck:
-        lossfn.load_state_dict(ck['lossfn'], strict=True)
-    elif any(True for _ in lossfn.parameters()):
-        raise ValueError('Checkpoint lacks learnable contrastive-loss parameters')
     optimizer.load_state_dict(ck['opt'])
 
 
 def check_stage2_resume(ck, args, contract, genes, stage1_identity, world, coverage):
+    for key in ['rng_per_rank','coverage_revision','supervised_cells_per_rank']:
+        if key not in ck: raise ValueError(f'Incomplete training checkpoint: {key}')
     check_checkpoint(ck, contract, genes)
     if 'opt' not in ck:
         raise ValueError('A new-run resume must include optimizer state')
-    if ck.get('stage1_identity') != stage1_identity or ck.get('world_size') != world:
+    if ck['stage1_identity']['sha256'] != stage1_identity['sha256'] or ck['world_size'] != world:
         raise ValueError('Resume Stage1 identity or DDP world size changed')
     check_recipe(ck, args, STAGE2_RECIPE)
     if not 0 <= int(ck['step']) <= coverage.total_steps:
         raise ValueError('Resume checkpoint exceeds the fixed epoch budget')
     from voice.full_coverage import REVISION
     expected = [coverage.supervised_before(int(ck['step']),r) for r in range(world)]
-    if ck.get('coverage_revision') != REVISION or ck.get('supervised_cells_per_rank') != expected:
+    if ck['coverage_revision'] != REVISION or ck['supervised_cells_per_rank'] != expected:
         raise ValueError('Resume coverage plan/count differs from the checkpoint')
     return int(ck['step'])
 
@@ -165,9 +165,7 @@ def capture_rng_per_rank():
 
 
 def restore_main_rng(ck, rank, world):
-    states = ck.get('rng_per_rank')
-    if states is None:
-        return False
+    states = ck['rng_per_rank']
     if len(states) != world:
         raise ValueError('RNG checkpoint world size differs')
     s = states[rank]

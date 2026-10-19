@@ -24,13 +24,14 @@ def main():
     from voice.gate import fit_beta,_fit_eligible
     from voice.training_contract import read_ids,dataset_contract,gene_hash
     from voice.tissue import reference_exclusions,tissue_of_object
+    from predict.spatial_context import prediction_protocol,check_prediction_protocol
     release=Release(a.release,retrieval=False)
     genes=np.load(release.paths['gene_space'],allow_pickle=False)['genes'].astype(str).tolist()
     model=json.loads((Path(a.bank)/'model.json').read_text())
     if model['checkpoint_sha256']!=release.hashes['stage1'] or model['gene_space_sha256']!=release.hashes['gene_space']:
         raise ValueError('Bank and model identities differ')
     refs=read_ids(a.references);contract=dataset_contract(a.dataset)
-    if contract and not set(refs)<=set(contract['gate_fit_references']):
+    if not set(refs)<=set(contract['gate_fit_references']):
         raise ValueError('Gate fitting references must belong to the approved training split')
     grouped={};all_fits=[];exclusions={}
     for sample in refs:
@@ -46,6 +47,7 @@ def main():
         with h5py.File(work/'direct.h5ad','r') as h:
             from anndata.io import read_elem
             info=read_elem(h['uns/voice25m'])
+            check_prediction_protocol(info['spatial_context'])
             if info['stage1_sha256']!=release.hashes['stage1'] or info['stage2_sha256']!=release.hashes['stage2']:
                 raise ValueError('Reference direct predictions belong to another model')
             er=read_elem(h['obs']).index.to_numpy().astype(np.int64)
@@ -86,7 +88,8 @@ def main():
           'K':50,'tau':0.03,'target_size':100,
           'reference_objects':refs,'reference_exclusions':exclusions,'fallback':'same_tissue',
           'max_calibration_cells':a.max_cells,'sampling_seed':a.seed,
-          'tissue_casefold':True,'min_refs':2,'panel_cut':1000}
+          'tissue_casefold':True,'min_refs':2,'panel_cut':1000,
+          'spatial_context':prediction_protocol()}
     out.with_suffix('.meta.json').write_text(json.dumps(meta,indent=2)+'\n')
 
 

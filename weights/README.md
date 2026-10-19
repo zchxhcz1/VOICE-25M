@@ -36,4 +36,4 @@ python train/export_release.py \
   --out /models/voice25m
 ```
 
-The destination must be empty. Omit both `--bank` and `--beta` to create a direct-only model for preparing reference features before calibration. Follow the UNI2-h access and distribution terms when sharing model files.
+The destination must be empty. Omit both `--bank` and `--beta` when exporting the intermediate checkpoints used by reference preparation during model training. Follow the UNI2-h access and distribution terms when sharing model files.

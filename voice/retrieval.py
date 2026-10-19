@@ -43,14 +43,6 @@ def read_array(spec):
             raise
     raise ValueError('Use NPY, uncompressed NPZ, or HDF5')
 
-def agreement(a, b):
-    require(a.shape == b.shape, 'Result shape mismatch')
-    require(np.array_equal(np.isfinite(a), np.isfinite(b)), 'Result finite-mask mismatch')
-    mask = np.isfinite(a) & np.isfinite(b)
-    require(mask.any(), 'No covered values to compare')
-    diff = a[mask].astype(np.float64) - b[mask].astype(np.float64)
-    return dict(RMSE=float(np.sqrt(np.mean(diff**2))),
-                max_abs_error=float(np.max(np.abs(diff))))
 
 def npz_matrix(path, member):
     """Read existing uncompressed npz matrices in place, without whole-file copies."""
@@ -89,7 +81,7 @@ class ReferenceBank:
         torch.backends.cudnn.allow_tf32 = False
         directory = Path(directory)
         self.model = json.loads((directory / 'model.json').read_text())
-        require((self.model.get('schema') == SCHEMA or self.model.get('schema', '').startswith('voice25m-')), 'Unsupported bank schema')
+        require(self.model.get('schema') == SCHEMA, 'Unsupported bank schema')
         identity = {k: v for k, v in self.model.items() if k != 'cache_fingerprint'}
         require(fingerprint(identity) == self.model['cache_fingerprint'], 'Bank model fingerprint mismatch')
         require(self.model['target_size'] == 100, 'Expected a cluster target size of 100 cells')
@@ -123,9 +115,7 @@ class ReferenceBank:
         path = directory / 'summaries' / f'object_{index:02d}'
         if path.is_dir():
             return path
-        matches = list((directory / 'summaries').glob(f'object_{index:02d}_*'))
-        require(len(matches) == 1, f'Missing or ambiguous reference object {index}')
-        return matches[0]
+        raise FileNotFoundError(f'Missing reference object directory: {path}')
 
     def _load_cache(self, banks, target, directory):
         # Preallocate the expression pool to bound host and device memory.
@@ -250,34 +240,3 @@ class ReferenceBank:
         return output.cpu().numpy(), {'max_retained_threshold_ties': required,
                                       'coverage_groups': len(self.groups),
                                       'covered_genes': int(self.covered.sum())}
-
-    @torch.no_grad()
-    def check_small(self, H, k, result):
-        # Independent per-group/per-source slow aggregation, first8 query rows.
-        # Preserve retrieval GEMM shape so half-score ties use identical inputs.
-        Q = original_keys(H[:min(256, len(H))], self.device)
-        ncheck = min(8, len(H))
-        output = torch.full((ncheck, len(self.panel)), float('nan'), device=self.device, dtype=torch.float32)
-        local = []
-        for si, E in enumerate(self.keys):
-            v, ids = (Q @ E.T).float()[:ncheck].topk(min(k, len(E)), dim=1)
-            local.append((v, ids))
-        for hits, positions in self.groups:
-            score = torch.cat([local[si][0] for si in hits], dim=1)
-            ids = torch.cat([local[si][1] + self.offsets[si] for si in hits], dim=1)
-            selected = score.topk(min(k, score.shape[1]), dim=1).values
-            theta, mx = selected[:, -1:], selected[:, :1]
-            above, equal = score > theta, score == theta
-            fraction = (selected.shape[1] - above.sum(1, keepdim=True)) / equal.sum(1, keepdim=True)
-            mass = above.float() + equal.float() * fraction
-            weight = torch.exp((score - mx) / TAU) * mass / torch.exp((selected-mx)/TAU).sum(1, keepdim=True)
-            genes = torch.tensor(positions, device=self.device)
-            for row in range(ncheck):
-                mask = weight[row] > 0
-                chosen = ids[row, mask]
-                columns = self.colmap[self.source[chosen].long()[:, None], genes[None, :]].long()
-                if bool((columns < 0).any().item()):
-                    raise RuntimeError('Unmeasured gene used in community result')
-                values = self.pool[self.row_start[chosen, None] + columns]
-                output[row, genes] = (values * weight[row, mask, None]).sum(0)
-        return agreement(output.cpu().numpy(), result[:ncheck])

@@ -13,8 +13,6 @@ def read_ids(path):
 
 def dataset_contract(dataset):
     root = Path(dataset)
-    if not (root/'splits/stage2_global_training.txt').is_file():
-        return None
     ids = {k: read_ids(root/'splits'/f'{k}.txt') for k in
            ['training_set','inslide_test_set','cross_slide_test_set','stage2_global_training']}
     tr, it, ct, s2 = (set(ids[k]) for k in ids)
@@ -31,8 +29,6 @@ def dataset_contract(dataset):
 
 
 def check_members(contract, stage, actual):
-    if contract is None:
-        return
     key = 'training_set' if stage == 'stage1' else 'stage2_global_training'
     actual = list(actual)
     if len(actual) != len(set(actual)) or set(actual) != set(contract[key]):
@@ -50,37 +46,19 @@ def checkpoint_identity(path):
     with p.open('rb') as f:
         for chunk in iter(lambda: f.read(8*1024*1024), b''):
             h.update(chunk)
-    return {'path': str(p.resolve()), 'sha256': h.hexdigest()}
+    return {'sha256': h.hexdigest()}
 
 
-def check_stage1_identity(ck):
-    expected = ck.get('stage1_identity')
-    if expected is None or checkpoint_identity(ck['args']['lora_ckpt'])['sha256'] != expected['sha256']:
-        raise ValueError('Stage-1 checkpoint identity differs from the Stage-2 initializer')
-
-
-
-
-def stage1_steps(cells, epochs, world, chunk, accumulation, retain_tail=False):
+def stage1_steps(cells, epochs, world, chunk, accumulation):
     if min(cells, epochs, world, chunk, accumulation) < 1:
         raise ValueError('Positive training budget required')
-    per_epoch = ((cells+world*chunk*accumulation-1)//(world*chunk*accumulation) if retain_tail
-                 else (cells//world//chunk)//accumulation)
+    per_epoch = (cells+world*chunk*accumulation-1)//(world*chunk*accumulation)
     if per_epoch < 1:
         raise ValueError('No full optimizer batch')
     return epochs*per_epoch
 
 
-def stage2_steps(cells, epochs, neighbours, world):
-    if min(cells, epochs, neighbours, world) < 1:
-        raise ValueError('Positive training budget required')
-    global_steps = (cells*epochs+neighbours-1)//neighbours
-    return global_steps, (global_steps+world-1)//world
-
-
 def check_checkpoint(ck, contract, genes=None):
-    if contract is None:
-        return
     if ck.get('run_contract') != contract:
         raise ValueError('Checkpoint training split differs from the current corpus')
     if genes is not None and ck.get('gene_head_sha256') != gene_hash(genes):

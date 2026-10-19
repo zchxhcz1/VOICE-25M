@@ -1,9 +1,7 @@
 """UNI2-h and LoRA utilities shared by training and inference."""
 import os
-import numpy as np
 import torch
 from torch import nn
-from torch.nn import functional as F
 import timm
 MEAN = torch.tensor([0.485,0.456,0.406]).view(1,3,1,1)
 STD = torch.tensor([0.229,0.224,0.225]).view(1,3,1,1)

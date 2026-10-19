@@ -106,7 +106,7 @@ def build(args):
     source_signatures = []
     for obj in objects:
         require(obj['split'] == 'train', f'{obj["object"]}: expected training reference')
-        validate_feature(obj['feature_meta'], identity, obj['E'])
+        validate_feature(obj['feature_meta'], identity)
         source_signatures.append(dict(arrays={k: signature(obj[k]) for k in ('E', 'Y', 'panel')},
                                       feature_meta_sha256=sha(obj['feature_meta'])))
     identity['source_signatures'] = source_signatures

@@ -106,9 +106,9 @@ class CoveragePlan:
 
 
 class FullCoverageDataset(Dataset):
-    def __init__(self,plan,rank,context_cells,radius,seed,d4,start=0):
+    def __init__(self,plan,rank,context_cells,radius,start=0):
         self.plan=plan;self.rank=rank;self.context_cells=context_cells;self.radius=radius
-        self.seed=seed;self.d4=d4;self.start=start;self.trees={}
+        self.start=start;self.trees={}
     def __len__(self):return self.plan.total_steps-self.start
     def __getitem__(self,i):
         step=i+self.start
@@ -119,12 +119,10 @@ class FullCoverageDataset(Dataset):
         idx=np.r_[targets,context]
         mask=np.arange(len(idx))<len(targets)
         if not valid:mask[:]=False
-        rng=np.random.RandomState((self.seed+step*1000003+self.rank*10007)%(2**31-1))
-        rot,flip=(rng.randint(4),bool(rng.randint(2))) if self.d4 else (0,False)
-        img,W=s.load(idx,rot,flip)
+        img,W=s.load(idx)
         return (torch.from_numpy(img),torch.from_numpy(W),torch.from_numpy(s.y[idx].astype(np.float32)),
                 torch.from_numpy(s.area_abs[idx]),torch.from_numpy(s.area_rel[idx]),torch.from_numpy(s.pos[idx]),
-                int(s.plat),torch.from_numpy(s.head_idx),torch.from_numpy(s.is_aux.astype(np.float32)),
+                torch.from_numpy(s.head_idx),
                 torch.from_numpy(mask))
 
 

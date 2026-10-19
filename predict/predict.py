@@ -2,7 +2,6 @@
 """Predict single-cell expression from H&E with automatic segmentation and reference retrieval."""
 from pathlib import Path
 import argparse
-import json
 import os
 import subprocess
 import sys
@@ -20,12 +19,11 @@ def parser():
     p.add_argument('--out', required=True, help='Output .h5ad; matrices are streamed to disk')
     p.add_argument('--tissue', default='', help='Tissue key for fusion weights; omitted or unknown uses global weights')
     p.add_argument('--genes', default='all', help='all, xenium, or a text file of gene symbols (one per line)')
-    p.add_argument('--direct-only', action='store_true', help='Run A without bank or gate')
     p.add_argument('--device', default='cuda')
     p.add_argument('--amp', choices=['bf16', 'fp16', 'fp32'], default='bf16')
     p.add_argument('--enc-chunk', type=int, default=64)
     p.add_argument('--query-batch', type=int, default=256)
-    p.add_argument('--target-cells', type=int, default=128)
+    p.add_argument('--workers', type=int, default=4, help='CPU workers loading cell crops')
     p.add_argument('--save-embeddings', action='store_true')
     p.add_argument('--segment-window', type=int, default=2048)
     p.add_argument('--segment-overlap', type=int, default=128)
@@ -36,12 +34,12 @@ def parser():
     return p
 
 
-def main(argv=None):
+def main(argv=None, *, reference=False):
     a = parser().parse_args(argv)
     if a.mpp is not None and (not 0 < a.mpp < 100):
         raise ValueError('--mpp must be positive microns per pixel')
-    if min(a.enc_chunk, a.query_batch, a.target_cells) < 1:
-        raise ValueError('Batch and tile sizes must be positive')
+    if min(a.enc_chunk, a.query_batch) < 1 or a.workers < 0:
+        raise ValueError('Batch sizes must be positive and workers nonnegative')
     if a.prepared and a.cells:
         raise ValueError('--cells applies only to --image')
     out = Path(a.out).resolve()
@@ -50,7 +48,7 @@ def main(argv=None):
         raise FileExistsError(f'Output/partial exists: {out}; choose a new path or --overwrite')
     out.parent.mkdir(parents=True, exist_ok=True)
     from voice.release import Release
-    release = Release(a.release, retrieval=not a.direct_only)
+    release = Release(a.release, retrieval=not reference)
     if a.image and not a.cells:
         from predict.slide_io import SlideReader
         reader = SlideReader(a.image)
@@ -80,7 +78,8 @@ def main(argv=None):
     from predict.model import Voice25M
     from predict.inputs import open_slide
     from predict.covariates import geometry
-    from predict.tiling import tiles_for
+    from torch.utils.data import DataLoader
+    from predict.spatial_context import TargetContextPlan, TargetContextDataset, commit_target_rows
     from voice.gate import apply_gate
     from voice.gate_rules import select_gate, validate_gate_genes
     from voice.retrieval import ReferenceBank
@@ -105,9 +104,10 @@ def main(argv=None):
         raise ValueError('Requested genes must be nonempty, unique, and present in the model gene head')
     panel = np.array([head_of[g] for g in names], np.int64)
     n, g = len(src), len(panel)
-    side, tiles = tiles_for(pos_um, a.target_cells)
+    sample_id = a.sample_id or Path(a.prepared or a.image).stem
+    plan = TargetContextPlan(pos_um, sample_id)
     source, beta_map = 'direct', {}
-    if not a.direct_only:
+    if not reference:
         validate_gate_genes(release.gate, genes.tolist())
         source, beta_map = select_gate(release.gate, a.tissue, g)
     var = pd.DataFrame({'global_gene_id': panel}, index=pd.Index(names, name='gene'))
@@ -116,11 +116,11 @@ def main(argv=None):
                        index=pd.Index(src.ids.astype(str),name='cell_id'))
     info = {'model':'VOICE-25M-scGPT', 'stage1_sha256':release.hashes['stage1'],
             'stage2_sha256':release.hashes['stage2'], 'gene_space_sha256':release.hashes['gene_space'],
-            'mpp':mpp, 'crop_um':55., 'tile_side_um':side, 'gate_source':source,
-            'direct_only':a.direct_only, 'tissue':a.tissue, 'source':src.kind, 'amp':a.amp, 'spatial_order':'x,y in source pixels',
+            'mpp':mpp, 'crop_um':55., 'spatial_context':plan.metadata(), 'gate_source':source,
+            'tissue':a.tissue, 'source':src.kind, 'amp':a.amp, 'spatial_order':'x,y in source pixels',
             'A_scale':'log1p(mu)', 'R_scale':'per-reference population z score of log1p(counts)',
-            'X_scale':'A' if a.direct_only else 'beta*A+(1-beta)*R; per-gene scores, not counts'}
-    print(f'[predict] {n:,} cells; {g:,} genes; {len(tiles):,} tiles', flush=True)
+            'X_scale':'A' if reference else 'beta*A+(1-beta)*R; per-gene scores, not counts'}
+    print(f'[predict] {n:,} cells; {g:,} genes; {len(plan):,} target/context blocks', flush=True)
     tensor = lambda x: torch.as_tensor(np.ascontiguousarray(x), device=model.device)
     hi = tensor(panel)
     with h5py.File(partial, 'w') as h:
@@ -134,29 +134,38 @@ def main(argv=None):
             ds.attrs.update({'encoding-type':'array','encoding-version':'0.2.0'})
             return ds
         A = matrix(h['layers'],'A',(n,g))
-        H1 = matrix(h['obsm'],'X_voice_phase1',(n,1536),'float16') if not a.direct_only or a.save_embeddings else None
+        H1 = matrix(h['obsm'],'X_voice_phase1',(n,1536),'float16') if not reference or a.save_embeddings else None
         X = matrix(h,'X',(n,g))
         if a.save_embeddings:
             H2 = matrix(h['obsm'],'X_voice_stage2',(n,1536),'float16')
             Z = matrix(h['obsm'],'X_voice_se2',(n,model.args['d_model']),'float16')
-        for ti, indices in enumerate(tiles):
-            indices = np.sort(indices)
-            images, masks = src.batch(indices)
+        loader = DataLoader(TargetContextDataset(src, plan), batch_size=None, num_workers=a.workers,
+                            pin_memory=model.device.type == 'cuda')
+        written = np.zeros(n, np.uint8)
+        for block, (images, masks, indices, n_targets) in enumerate(loader):
+            indices = indices.numpy()
+            n_targets = int(n_targets)
             images, masks = tensor(images), tensor(masks)
-            f2 = model.encode(images,masks,'stage2',a.enc_chunk)
-            direct,z = model.decode(f2,tensor(pos_um[indices]),tensor(aa[indices]),tensor(ar[indices]),hi)
+            f2 = model.encode(images, masks, 'stage2', a.enc_chunk)
+            direct, z = model.decode(f2, tensor(pos_um[indices]), tensor(aa[indices]), tensor(ar[indices]), hi)
             direct = direct.cpu().numpy()
             if not np.isfinite(direct).all():
                 raise RuntimeError('Nonfinite direct prediction')
-            A[indices] = direct
-            if a.direct_only:
-                X[indices] = direct
+            payload = [(A, direct)]
+            if reference:
+                payload.append((X, direct))
             if a.save_embeddings:
-                H2[indices] = f2.cpu().numpy(); Z[indices] = z.cpu().numpy()
+                payload.extend([(H2, f2.cpu().numpy()), (Z, z.cpu().numpy())])
+            commit_target_rows(indices, n_targets, written, payload)
             if H1 is not None:
-                H1[indices] = model.encode(images,masks,'phase1',a.enc_chunk).cpu().numpy()
-            if (ti+1)%20 == 0 or ti+1 == len(tiles):
-                print(f'[A] tiles {ti+1}/{len(tiles)}',flush=True)
+                owned = indices[:n_targets]
+                order = np.argsort(owned)
+                features = model.encode(images[:n_targets], masks[:n_targets], 'phase1', a.enc_chunk).cpu().numpy()
+                H1[owned[order]] = features[order]
+            if (block+1) % 20 == 0 or block+1 == len(plan):
+                print(f'[A] blocks {block+1}/{len(plan)}', flush=True)
+        if not np.all(written == 1):
+            raise RuntimeError('Prediction must write each target cell exactly once')
         del model, images, masks, f2, direct, z, hi
         if getattr(src,'_rd',None) is not None:
             src._rd.close(); src._rd = None
@@ -165,9 +174,8 @@ def main(argv=None):
             torch.cuda.empty_cache()
         beta = np.ones(g,np.float32)
         covered = np.zeros(g,bool)
-        if not a.direct_only:
-            target_id = a.sample_id or Path(a.prepared or a.image).stem
-            excluded = set(a.exclude) | {target_id}
+        if not reference:
+            excluded = set(a.exclude) | {sample_id}
             bank = ReferenceBank(release.paths['bank'],device=a.device,exclude=excluded)
             bank.configure(panel)
             R = matrix(h['layers'],'R',(n,g))

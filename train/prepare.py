@@ -19,11 +19,9 @@ def main():
     root=Path(a.dataset).resolve(); work=Path(a.work_dir).resolve()/'direct'
     work.mkdir(parents=True,exist_ok=True)
     contract=dataset_contract(root)
-    if contract is None:
-        raise ValueError('Supply the documented split files and MANIFEST.csv')
     table=np.load(a.gene_table,allow_pickle=False)
     genes=table['genes'].astype(str); emb=table['emb'].astype(np.float32)
-    if emb.ndim!=2 or len(emb)!=len(genes) or len(set(genes))!=len(genes) or not np.isfinite(emb).all():
+    if emb.ndim!=2 or emb.shape[1]!=512 or len(emb)!=len(genes) or len(set(genes))!=len(genes) or not np.isfinite(emb).all():
         raise ValueError('Invalid gene embedding table')
     objects=[]; platforms=[]; splits=[]; masks=[]; xenium=set()
     from voice.tissue import object_directory
